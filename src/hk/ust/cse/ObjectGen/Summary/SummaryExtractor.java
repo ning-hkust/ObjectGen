@@ -72,7 +72,6 @@ public class SummaryExtractor {
       // obtain initial intra-summaries of the method
       //List<Summary> intraSummaries = m_intraExtractor.extract(methodSig, saveSummaries, 30000);
       List<Summary> intraSummaries = m_intraExtractor.getIntraSummaryDatabase().readSummaries(methodSig);
-      
       if (intraSummaries != null && intraSummaries.size() > 0) {
         // average the time for each intra-summaries' expand
         long maxExpandTime = maxExtractTime / intraSummaries.size();
@@ -169,7 +168,7 @@ public class SummaryExtractor {
 
       printStepSpaces(expandings.size());
       System.out.println("Merging: " + (i + 1) + " / " + size + " callee invocation: " + invocation.getName());
-
+      
       // obtain the summaries (fully expanded) of this invocation
       List<List<Summary>> calleeSummariesList = new ArrayList<List<Summary>>();
       
@@ -268,7 +267,7 @@ public class SummaryExtractor {
         List<Summary> expandedInvocation = new ArrayList<Summary>();
         for (int j = 0, size2 = calleeSummariesList.size(); j < size2 && !partialOvertime; j++) {
           List<Summary> calleeSummaries2 = calleeSummariesList.get(j);
-          
+
           // print status
           printStepSpaces(expandings.size());
           System.out.print(lastExpanded.size() + " caller summaries <- " + calleeSummaries2.size() + " callee summaries.");
@@ -304,6 +303,7 @@ public class SummaryExtractor {
                 // XXX bug
               }
             }
+            System.out.print((k + 1) + ((((k + 1) % 20) == 0 || k == size3 - 1) ? "\n" : " "));
           }
         }
         lastExpanded = expandedInvocation; // ready to expand next invocation
@@ -375,7 +375,8 @@ public class SummaryExtractor {
   // create a new merged summary of the two summaries, will not affect summary1 and summary2
   private Summary mergeSummaries(Summary summary1, Summary summary2, Reference invocation) {  
     
-    Hashtable<String, String> paramArgMap = buildParamArgMap(invocation);
+    Hashtable<String, String> paramArgMap    = buildParamArgMap(invocation);
+    Hashtable<Instance, Instance> replaceMap = new Hashtable<Instance, Instance>();
     
     // make clone to avoid affecting summary1 and summary2
     Summary cloneSummary1 = summary1.deepClone();
@@ -417,25 +418,24 @@ public class SummaryExtractor {
 
     // handle potentially affected fields
     Collection<Instance> instances = cloneSummary1.findInvocationAsEffect(invocation);
-    Hashtable<Instance, Instance> replaceMap = new Hashtable<Instance, Instance>();
-    
     Iterator<Instance> iter = instances.iterator();
-    Instance instance2 = iter.hasNext() ? iter.next() : null;
-    while (instance2 != null) {
+    Instance instance = iter.hasNext() ? iter.next() : null;
+    while (instance != null) {
       cloneSummary1.mergeFieldEffect(
-          instance2, invocation, cloneSummary2, paramArgMap, translatedMap, mergedInstances, replaceMap);
+          instance, invocation, cloneSummary2, paramArgMap, translatedMap, mergedInstances, replaceMap);
       // after merge, this "_undecidable_" field is no longer useful for instance
-      instance2.getFieldSet().remove("_undecidable_" + invocation.getName());
-      cloneSummary1 = replaceInstances(cloneSummary1, replaceMap);
+      instance.getFieldSet().remove("_undecidable_" + invocation.getName());
       
-      instance2 = iter.hasNext() ? iter.next() : null;
-      if (instance2 != null && replaceMap.containsKey(instance2)) {
+      // next one
+      instance = iter.hasNext() ? iter.next() : null;
+      if (instance == null || (instance != null && replaceMap.containsKey(instance))) {
         // re-find invocation effected instances as instance2 has already been replaced
         instances = cloneSummary1.findInvocationAsEffect(invocation);
         iter = instances.iterator();
-        instance2 = iter.hasNext() ? iter.next() : null;
+        instance = iter.hasNext() ? iter.next() : null;
       }
     }
+    cloneSummary1 = replaceInstances(cloneSummary1, replaceMap);
     
     // merge the static field effect
     long invokeTime = Long.parseLong(invocation.getName().substring(invocation.getName().lastIndexOf('_') + 1));
@@ -443,22 +443,24 @@ public class SummaryExtractor {
         invokeTime, paramArgMap, translatedMap, mergedInstances, replaceMap);
 
     // handle invocation return
-    if (cloneSummary2.getEffect().containsKey("RET")) { // this invocation does not return void
+    if (cloneSummary2.getEffect().containsKey("RET")) { // this invocation does not return void      
       instances = cloneSummary1.findInvocationAsReturn(invocation);
-      for (Instance instance : instances) {
-        // cannot make sure retInstance (and its fields) are assigned later or earlier then instance (and its fields) and 
-        // vice-versa, for example, org.apache.commons.collections.map.AbstractLinkedMap.init()V and 
-        // org.apache.commons.collections.list.TreeList$AVLNode.rotateLeft (should have 60 results) are two opposite examples
-        
-        Reference retRef = cloneSummary2.getEffect().get("RET");
-        Instance retInstance = retRef.getInstance();
-        Instance replacedAs = replaceMap.get(retInstance);
-        if (replacedAs != null) {
-          cloneSummary1.mergeFieldEffect2(replacedAs, instance, invokeTime, null, translatedMap, mergedInstances, replaceMap);
-          replaceMap.put(instance, replacedAs); // fieldInstance could exist in path condition list
-        }
-        else {
-          try {
+      iter = instances.iterator();
+      instance = iter.hasNext() ? iter.next() : null;
+      while (instance != null) {
+        try {
+          // cannot make sure retInstance (and its fields) are assigned later or earlier then instance (and its fields) and 
+          // vice-versa, for example, org.apache.commons.collections.map.AbstractLinkedMap.init()V and 
+          // org.apache.commons.collections.list.TreeList$AVLNode.rotateLeft (should have 60 results) are two opposite examples
+          
+          Reference retRef = cloneSummary2.getEffect().get("RET");
+          Instance retInstance = retRef.getInstance();
+          Instance replacedAs = replaceMap.get(retInstance);
+          if (replacedAs != null) {
+            cloneSummary1.mergeFieldEffect2(replacedAs, instance, invokeTime, null, translatedMap, mergedInstances, replaceMap);
+            replaceMap.put(instance, replacedAs); // fieldInstance could exist in path condition list
+          }
+          else {
             retInstance = cloneSummary1.translateScope(
                 retRef.getInstance(), paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
 
@@ -476,30 +478,21 @@ public class SummaryExtractor {
                 instance.getFieldSet().remove(fieldRef.getName());
               }
             }
-          } catch (NullPointerException e) {
-            // XXX bug
           }
+        } catch (Throwable e) {
+          // in case any unexpected exception happens, we can still continue;
         }
+        // next one
+        instance = iter.hasNext() ? iter.next() : null;
       }
     }
 
-    // since this invocation is merged, remove callee's invocation field
+    // since this invocation is merged, remove caller's invocation field
     if (cloneSummary2.getEffect().containsKey("RET") || (cloneSummary2.getMethodData() != null && 
         cloneSummary2.getMethodData().getIR().getMethod().getReturnType().getName().toString().equals("V"))) {
-      keys = cloneSummary1.getEffect().keys();
-      while (keys.hasMoreElements()) {
-        String key = (String) keys.nextElement();
-        Reference reference = cloneSummary1.getEffect().get(key);
-        reference.getInstance().getFieldSet().remove(invocation.getName());
-      }
-      for (Condition condition : cloneSummary1.getPathConditions()) {
-        for (ConditionTerm term : condition.getConditionTerms()) {
-          for (Instance instance : term.getInstances()) {
-            instance.getFieldSet().remove(invocation.getName());
-          }
-        }
-      }
+      removeInvocationName(cloneSummary1, invocation.getName());
     }
+    cloneSummary1 = replaceInstances(cloneSummary1, replaceMap);
     
     // merge path conditions (need to translate scope)
     List<Condition> pathConditions1 = cloneSummary1.getPathConditions();
@@ -567,8 +560,6 @@ public class SummaryExtractor {
     return mergedRelationMap;
   }
   
-
-  
   // may affect the original instances, better use a clone version
   // translate to the scope of the current summary
   private List<Condition> translateScope(Summary toInv, List<Condition> pathConditions, 
@@ -577,25 +568,36 @@ public class SummaryExtractor {
     List<Condition> translatedConds = new ArrayList<Condition>();
 
     for (Condition condition : pathConditions) {
+      boolean oneTermTranslated = false;
       List<ConditionTerm> translatedTerms = new ArrayList<ConditionTerm>();
       for (ConditionTerm term : condition.getConditionTerms()) {
+        boolean oneInstanceTranslated = false;
         List<Instance> translatedInstances = new ArrayList<Instance>();
-        for (Instance instance : term.getInstances()) {          
-          translatedInstances.add(toInv.translateScope(instance, paramArgMap, translatedMap, mergedInstances, replaceMap, null));
+        for (Instance instance : term.getInstances()) {
+          Instance translated = toInv.translateScope(
+              instance, paramArgMap, translatedMap, mergedInstances, replaceMap, null);
+          translatedInstances.add(translated);
+          oneInstanceTranslated |= translated != instance;
         }
 
-        ConditionTerm translatedTerm = null;
-        if (term instanceof BinaryConditionTerm) {
-          translatedTerm = new BinaryConditionTerm(translatedInstances.get(0), 
-              ((BinaryConditionTerm) term).getComparator(), translatedInstances.get(1));
+        if (oneInstanceTranslated) {
+          ConditionTerm translatedTerm = null;
+          if (term instanceof BinaryConditionTerm) {
+            translatedTerm = new BinaryConditionTerm(translatedInstances.get(0), 
+                ((BinaryConditionTerm) term).getComparator(), translatedInstances.get(1));
+          }
+          else {
+            translatedTerm = new TypeConditionTerm(translatedInstances.get(0), 
+                ((TypeConditionTerm) term).getComparator(), ((TypeConditionTerm) term).getTypeString());
+          }
+          translatedTerms.add(translatedTerm);
+          oneTermTranslated = true;
         }
         else {
-          translatedTerm = new TypeConditionTerm(translatedInstances.get(0), 
-              ((TypeConditionTerm) term).getComparator(), ((TypeConditionTerm) term).getTypeString());
+          translatedTerms.add(term);
         }
-        translatedTerms.add(translatedTerm);
       }
-      translatedConds.add(new Condition(translatedTerms));
+      translatedConds.add(oneTermTranslated ? new Condition(translatedTerms): condition);
     }
     return translatedConds;
   }
@@ -720,7 +722,7 @@ public class SummaryExtractor {
   
   private Summary replaceInstances(Summary summary, Hashtable<Instance, Instance> replaceMap) {
     Hashtable<Instance, Instance> replacedMap = new Hashtable<Instance, Instance>();
-
+    
     Hashtable<String, Reference> replacedEffect = summary.getEffect();
     List<Condition> replacedPathCond            = summary.getPathConditions();
     Hashtable<String, Relation> replacedRelMap  = summary.getRelationMap();
@@ -730,11 +732,11 @@ public class SummaryExtractor {
     while (replaceMap.size() != oldSize && totalLooped++ < 10 /* avoid endless loop due to bugs */) {
       oldSize = replaceMap.size();
       
-      Enumeration<Instance> keys = replaceMap.keys();
-      while (keys.hasMoreElements()) {
-        Instance key = (Instance) keys.nextElement();
-        replaceInstance(key, replaceMap, replacedMap);
-      }
+//      Enumeration<Instance> keys = replaceMap.keys();
+//      while (keys.hasMoreElements()) {
+//        Instance key = (Instance) keys.nextElement();
+//        replaceInstance(key, replaceMap, replacedMap);
+//      }
   
       replacedEffect   = replaceInstances(replacedEffect, replaceMap, replacedMap);
       replacedPathCond = replaceInstances(replacedPathCond, replaceMap, replacedMap);
@@ -744,9 +746,8 @@ public class SummaryExtractor {
     return new Summary(replacedPathCond, replacedEffect, replacedRelMap, summary.getMethodData());
   }
   
-  private Hashtable<String, Reference> replaceInstances(
-      Hashtable<String, Reference> methodRefs, Hashtable<Instance, Instance> replaceMap, 
-      Hashtable<Instance, Instance> replacedMap) {
+  private Hashtable<String, Reference> replaceInstances(Hashtable<String, Reference> methodRefs, 
+      Hashtable<Instance, Instance> replaceMap, Hashtable<Instance, Instance> replacedMap) {
     Hashtable<String, Reference> replaced = new Hashtable<String, Reference>();
     
     Enumeration<String> keys = methodRefs.keys();
@@ -765,31 +766,40 @@ public class SummaryExtractor {
     return replaced;
   }
   
-  private  List<Condition> replaceInstances(
-      List<Condition> pathConditions, Hashtable<Instance, Instance> replaceMap, 
-      Hashtable<Instance, Instance> replacedMap) {
+  private  List<Condition> replaceInstances(List<Condition> pathConditions, 
+      Hashtable<Instance, Instance> replaceMap, Hashtable<Instance, Instance> replacedMap) {
     
     List<Condition> replacedConds = new ArrayList<Condition>();
     for (Condition condition : pathConditions) {
+      boolean oneTermReplaced = false;
       List<ConditionTerm> replacedTerms = new ArrayList<ConditionTerm>();
       for (ConditionTerm term : condition.getConditionTerms()) {
-        List<Instance> translatedInstances = new ArrayList<Instance>();
+        boolean oneInstanceReplaced = false;
+        List<Instance> replacedInstances = new ArrayList<Instance>();
         for (Instance instance : term.getInstances()) {
-          translatedInstances.add(replaceInstance(instance, replaceMap, replacedMap));
+          Instance replaced = replaceInstance(instance, replaceMap, replacedMap);
+          replacedInstances.add(replaced);
+          oneInstanceReplaced |= replaced != instance;
         }
 
-        ConditionTerm replacedTerm = null;
-        if (term instanceof BinaryConditionTerm) {
-          replacedTerm = new BinaryConditionTerm(translatedInstances.get(0), 
-              ((BinaryConditionTerm) term).getComparator(), translatedInstances.get(1));
+        if (oneInstanceReplaced) {
+          ConditionTerm replacedTerm = null;
+          if (term instanceof BinaryConditionTerm) {
+            replacedTerm = new BinaryConditionTerm(replacedInstances.get(0), 
+                ((BinaryConditionTerm) term).getComparator(), replacedInstances.get(1));
+          }
+          else {
+            replacedTerm = new TypeConditionTerm(replacedInstances.get(0), 
+                ((TypeConditionTerm) term).getComparator(), ((TypeConditionTerm) term).getTypeString());
+          }
+          replacedTerms.add(replacedTerm);
+          oneTermReplaced = true;
         }
         else {
-          replacedTerm = new TypeConditionTerm(translatedInstances.get(0), 
-              ((TypeConditionTerm) term).getComparator(), ((TypeConditionTerm) term).getTypeString());
+          replacedTerms.add(term);
         }
-        replacedTerms.add(replacedTerm);
       }
-      replacedConds.add(new Condition(replacedTerms));
+      replacedConds.add(oneTermReplaced ? new Condition(replacedTerms) : condition);
     }
     return replacedConds;
   }
@@ -840,7 +850,7 @@ public class SummaryExtractor {
   private Instance replaceInstance(Instance instance, Hashtable<Instance, Instance> replaceMap, 
       Hashtable<Instance, Instance> replacedMap, HashSet<Instance> prevInstances) {
 
-    if (prevInstances.contains(instance)) {
+    if (prevInstances.contains(instance) || prevInstances.size() > 10 /* too much, likely due to a bug */) {
       return instance;
     }
     else {
@@ -865,6 +875,8 @@ public class SummaryExtractor {
           if (left != instance.getLeft() || right != instance.getRight()) {
             replaced = new Instance(left, instance.getOp(), right, instance.getCreateBlock());
             replacedMap.put(instance, replaced);
+            replacedMap.put(instance.getLeft(), left);
+            replacedMap.put(instance.getRight(), right);
           }
         }
       }
@@ -881,33 +893,69 @@ public class SummaryExtractor {
       Hashtable<Instance, Instance> replacedMap, HashSet<Instance> prevInstances) {
     
     for (Reference fieldRef : instance.getFields()) {
-      Instance replacedInstance = replaceInstance(fieldRef.getInstance(), replaceMap, replacedMap, prevInstances); 
-      if (fieldRef.getInstance() != replacedInstance) {
-        boolean setLastRef = false;//fieldRef.getInstance().getLastReference() == fieldRef; //XXX
-        instance.setField(fieldRef.getName(), fieldRef.getType(), fieldRef.getCallSites(), replacedInstance, setLastRef, true);
-        replaceMap.put(fieldRef.getInstance(), replacedInstance);
+      Instance replaced = replaceInstance(fieldRef.getInstance(), replaceMap, replacedMap, prevInstances); 
+      if (fieldRef.getInstance() != replaced) {
+        boolean setLastRef = false;//fieldRef.getInstance().getLastReference() == fieldRef;
+        instance.setField(fieldRef.getName(), fieldRef.getType(), fieldRef.getCallSites(), replaced, setLastRef, true);
+        replaceMap.put(fieldRef.getInstance(), replaced);
 
         // set the life time for translated in fieldRefTo
         Reference fieldRefTo = instance.getField(fieldRef.getName());
-        setInstanceLifeTime(fieldRefTo, fieldRef, replacedInstance, fieldRef.getInstance(), null);
-
-        // also replace the instances in the oldInstance list
-        List<Instance> oldList = new ArrayList<Instance>(fieldRef.getOldInstances());
-        for (Instance oldInstance : oldList) {
-          Instance replacedOldInstance = replaceInstance(oldInstance, replaceMap, replacedMap, prevInstances); 
-          fieldRefTo.getOldInstances().add(replacedOldInstance);
-          setInstanceLifeTime(fieldRefTo, fieldRef, replacedOldInstance, oldInstance, null);
-          
-          setLastRef = oldInstance.getLastReference() == fieldRef;
-          if (setLastRef) {
-            replacedOldInstance.setLastReference(fieldRefTo);
+        setInstanceLifeTime(fieldRefTo, fieldRef, replaced, fieldRef.getInstance(), null);
+      }
+      
+      // also replace the instances in the oldInstance list
+      Reference fieldRefTo = instance.getField(fieldRef.getName());
+      for (Instance oldInstance : new ArrayList<Instance>(fieldRef.getOldInstances())) {
+        Instance replacedOld = replaceInstance(oldInstance, replaceMap, replacedMap, prevInstances);
+        if (replacedOld != oldInstance) {
+          fieldRefTo.getOldInstances().remove(oldInstance);
+          fieldRefTo.getOldInstances().add(replacedOld);
+          setInstanceLifeTime(fieldRefTo, fieldRef, replacedOld, oldInstance, null);
+          if (oldInstance.getLastReference() == fieldRef) {
+            replacedOld.setLastReference(fieldRefTo);
           }
-          
-          if (replacedOldInstance != oldInstance) {
-            replaceMap.put(oldInstance, replacedOldInstance);
-          }
+          replaceMap.put(oldInstance, replacedOld);
         }
       }
+    }
+  }
+  
+  private void removeInvocationName(Summary summary, String invocationName) {
+    HashSet<Instance> removed = new HashSet<Instance>();
+    
+    Enumeration<String> keys = summary.getEffect().keys();
+    while (keys.hasMoreElements()) {
+      String key = (String) keys.nextElement();
+      Reference reference = summary.getEffect().get(key);
+      removeInvocationName(reference, invocationName, removed);
+    }
+    
+    for (Condition condition : summary.getPathConditions()) {
+      for (ConditionTerm term : condition.getConditionTerms()) {
+        for (Instance instance : term.getInstances()) {
+          removeInvocationName(instance, invocationName, removed);
+        }
+      }
+    }
+  }
+
+  private void removeInvocationName(Reference reference, String invocationName, HashSet<Instance> removed) {
+    removeInvocationName(reference.getInstance(), invocationName, removed);
+    for (Instance oldInstance : reference.getOldInstances()) {
+      removeInvocationName(oldInstance, invocationName, removed);
+    }
+  }
+  
+  private void removeInvocationName(Instance instance, String invocationName, HashSet<Instance> removed) {
+    if (removed.contains(instance)) {
+      return;
+    }
+    removed.add(instance);
+
+    instance.getFieldSet().remove(invocationName);
+    for (Reference fieldRef : instance.getFields()) {
+      removeInvocationName(fieldRef, invocationName, removed);
     }
   }
   
@@ -1090,42 +1138,46 @@ public class SummaryExtractor {
 
   public static void main(String args[]) throws Exception {
     if (args.length == 0) {
-      //String appJar = "D:/Projects/BranchModelGenerator/targets/apache-commons-collections/target/commons-collections-3.1.jar";
-      String appJar = "D:/Projects/BranchModelGenerator/targets/sat4j/target/org.sat4j.core-2.2.0.jar";
+      //String appJar = "D:/Projects/BranchModelGenerator/targets/apache-commons-collections/target/commons-collections-3.2.1.jar";
+      //String appJar = "D:/Projects/BranchModelGenerator/targets/sat4j/target/org.sat4j.core-2.2.0.jar";
       //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-ant/targets/ant-all-1.7.0_removed.jar";
       //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-log4j/targets/log4j-1.2.15_removed.jar";
+      String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-commons-collections/targets/commons-collections-3.1.jar";
       //String appJar = "D:/Projects/ObjectGen/hk.ust.cse.ObjectGen.jar";
       String pseudoImplJar = "./lib/hk.ust.cse.Prevision_PseudoImpl.jar";
       SummaryExtractor extractor = new SummaryExtractor(appJar, pseudoImplJar);
 
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.rotateRight()Lorg/apache/commons/collections/list/TreeList$AVLNode");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.rotateLeft()Lorg/apache/commons/collections/list/TreeList$AVLNode");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.recalcHeight()V");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.getLeftSubTree()Lorg/apache/commons/collections/list/TreeList$AVLNode");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.setLeft(Lorg/apache/commons/collections/list/TreeList$AVLNode;Lorg/apache/commons/collections/list/TreeList$AVLNode;)V");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.setRight(Lorg/apache/commons/collections/list/TreeList$AVLNode;Lorg/apache/commons/collections/list/TreeList$AVLNode;)V");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.setOffset(Lorg/apache/commons/collections/list/TreeList$AVLNode;I)I");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.balance()Lorg/apache/commons/collections/list/TreeList$AVLNode");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.max", 465);
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.removeMax()Lorg/apache/commons/collections/list/TreeList$AVLNode");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.removeMin()Lorg/apache/commons/collections/list/TreeList$AVLNode");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.removeSelf", 534);
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.remove(I)Lorg/apache/commons/collections/list/TreeList$AVLNode");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList.get(I)Ljava/lang/Object;");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList.remove(I)Ljava/lang/Object;");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList.add", 187);
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.insertOnRight(ILjava/lang/Object;)Lorg/apache/commons/collections/list/TreeList$AVLNode;");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.insert(ILjava/lang/Object;)Lorg/apache/commons/collections/list/TreeList$AVLNode;");
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList.checkInterval", 249);
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "hk.ust.cse.ObjectGen.TestCases.TestObjectGen.add", 10);
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "hk.ust.cse.ObjectGen.TestCases.TestObjectGen.setList", 18);
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "hk.ust.cse.ObjectGen.TestCases.TestObjectGen.setList2", 28);
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "hk.ust.cse.ObjectGen.TestCases.TestObjectGen.useAbstract", 37);
-      //IR ir = Jar2IR.getIR(s_executor.getWalaAnalyzer(), "hk.ust.cse.ObjectGen.TestCases.TestIndirectFieldAssignment.test16", 129);
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList.<init>(Ljava/util/Collection;)V");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.getLeftSubTree()Lorg/apache/commons/collections/list/TreeList$AVLNode");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.getRightSubTree()Lorg/apache/commons/collections/list/TreeList$AVLNode");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.getOffset(Lorg/apache/commons/collections/list/TreeList$AVLNode;)I");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.setOffset(Lorg/apache/commons/collections/list/TreeList$AVLNode;I)I");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.recalcHeight()V");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.setLeft(Lorg/apache/commons/collections/list/TreeList$AVLNode;Lorg/apache/commons/collections/list/TreeList$AVLNode;)V");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.setRight(Lorg/apache/commons/collections/list/TreeList$AVLNode;Lorg/apache/commons/collections/list/TreeList$AVLNode;)V");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.rotateLeft()Lorg/apache/commons/collections/list/TreeList$AVLNode");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.rotateRight()Lorg/apache/commons/collections/list/TreeList$AVLNode");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.balance()Lorg/apache/commons/collections/list/TreeList$AVLNode");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.min()Lorg/apache/commons/collections/list/TreeList$AVLNode;");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.max()Lorg/apache/commons/collections/list/TreeList$AVLNode;");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.removeMax()Lorg/apache/commons/collections/list/TreeList$AVLNode");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.removeMin()Lorg/apache/commons/collections/list/TreeList$AVLNode");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.removeSelf()Lorg/apache/commons/collections/list/TreeList$AVLNode");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.remove(I)Lorg/apache/commons/collections/list/TreeList$AVLNode");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList.get(I)Ljava/lang/Object;");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList.remove(I)Ljava/lang/Object;");
+      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.insert(ILjava/lang/Object;)Lorg/apache/commons/collections/list/TreeList$AVLNode;");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.insertOnLeft(ILjava/lang/Object;)Lorg/apache/commons/collections/list/TreeList$AVLNode;");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.insertOnRight(ILjava/lang/Object;)Lorg/apache/commons/collections/list/TreeList$AVLNode;");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList.add(ILjava/lang/Object;)V");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList.listIterator()Ljava/util/ListIterator;");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.next()Lorg/apache/commons/collections/list/TreeList$AVLNode;");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$TreeListIterator.hasNext()Z");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$TreeListIterator.checkModCount()V");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$TreeListIterator.next()Ljava/lang/Object;");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.iterators.ObjectGraphIterator.findNextByIterator(Ljava/util/Iterator;)V");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.iterators.ObjectGraphIterator.next()Ljava/lang/Object;");
-      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.balance()Lorg/apache/commons/collections/list/TreeList$AVLNode;");
-      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.sat4j.minisat.constraints.cnf.LearntHTClause.<init>(Lorg/sat4j/specs/IVecInt;Lorg/sat4j/minisat/core/ILits;)V");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.sat4j.minisat.constraints.cnf.LearntHTClause.<init>(Lorg/sat4j/specs/IVecInt;Lorg/sat4j/minisat/core/ILits;)V");
       
       // read the list of all/filter/extracted methods
       HashSet<String> allMethodSet = Utils.readStringSetFromFile("./summaries/all_methods.txt");
@@ -1137,7 +1189,6 @@ public class SummaryExtractor {
       String methodSig = ir.getMethod().getSignature();
       List<Summary> extracted = extractor.extract(methodSig, true, 100000, allMethodSet, filterSet, extractedSet);
       
-      System.out.println("Total elapsed: " + (System.currentTimeMillis() - start) + "ms.");
       if (extracted != null) {
         // display summaries
         for (int i = 0, size = extracted.size(); i < size; i++) {
@@ -1155,6 +1206,7 @@ public class SummaryExtractor {
           System.out.println();
         }
       }
+      System.out.println("Total elapsed: " + (System.currentTimeMillis() - start) + "ms.");
       
 //      System.out.println("Total methods extracted and saved: " + extractedSet.size());
 //      for (String savedExtraction : extractedSet) {

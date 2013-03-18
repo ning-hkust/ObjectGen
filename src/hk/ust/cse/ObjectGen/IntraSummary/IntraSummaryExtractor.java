@@ -168,15 +168,16 @@ public class IntraSummaryExtractor {
   // extract intra-summary methods
   public static void main(String args[]) throws Exception {
     if (args.length == 0) {
-      //String appJar = "D:/Projects/BranchModelGenerator/targets/apache-commons-collections/target/commons-collections-3.1.jar";
-      String appJar = "D:/Projects/BranchModelGenerator/targets/sat4j/target/org.sat4j.core-2.2.0.jar";
+      //String appJar = "D:/Projects/BranchModelGenerator/targets/apache-commons-collections/target/commons-collections-3.2.1.jar";
+      //String appJar = "D:/Projects/BranchModelGenerator/targets/sat4j/target/org.sat4j.core-2.2.0.jar";
       //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-log4j/targets/log4j-1.2.15_removed.jar";
       //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-ant/targets/ant-all-1.7.0_removed.jar";
+      String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-commons-collections/targets/commons-collections-3.1.jar";
       //String appJar = "D:/Projects/ObjectGen/hk.ust.cse.ObjectGen.jar";
       String pseudoImplJar = "./lib/hk.ust.cse.Prevision_PseudoImpl.jar"; 
       IntraSummaryExtractor extractor = new IntraSummaryExtractor(appJar, pseudoImplJar);
 
-      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.sat4j.minisat.constraints.cnf.HTClause.<init>(Lorg/sat4j/specs/IVecInt;Lorg/sat4j/minisat/core/ILits;)V");
+      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.insertOnRight(ILjava/lang/Object;)Lorg/apache/commons/collections/list/TreeList$AVLNode;");
 
       String methodSig = ir.getMethod().getSignature();
       List<Summary> intraSummaries = extractor.extract(methodSig, true, 100000);
@@ -196,6 +197,6 @@ public class IntraSummaryExtractor {
     }
   }
   
-  private final ForwardExecutor   m_executor;
+  private final ForwardExecutor m_executor;
   private final SummaryDatabase m_intraSummaryDatabase;
 }

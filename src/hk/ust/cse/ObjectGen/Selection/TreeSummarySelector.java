@@ -103,7 +103,7 @@ public class TreeSummarySelector extends AbstractSummarySelector {
         if (node != null) {
           List<Summary> nodeSummaries = node.getSummaries();
           currLevel = prevLevel == null ? nodeSummaries : 
-                                          new ArrayList<>(Utils.intersect(prevLevel, nodeSummaries));
+                                          new ArrayList<Summary>(Utils.intersect(prevLevel, nodeSummaries));
           if (currLevel.size() == 0) { // no intersect summary, backtrack
             currLevel = prevLevel;
             break;

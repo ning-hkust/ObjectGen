@@ -164,6 +164,7 @@ public class Summary {
               // since we have found out the match, merge them immediately
               if (translatedTop != topInstance) {
                 mergeFieldEffect2(translatedTop, topInstance, invokeTime, paramArgMap, translatedMap, mergedInstances, replaceMap);
+                replaceMap.put(topInstance, translatedTop);
               }
             }
           }
@@ -222,6 +223,9 @@ public class Summary {
       
       for (Reference fieldRef : instance.getFields()) {
         findInvocationAsReturn(fieldRef.getInstance(), invocation, found, visited);
+        for (Instance oldInstance : fieldRef.getOldInstances()) {
+          findInvocationAsReturn(oldInstance, invocation, found, visited);
+        }
       }
     }
   }
@@ -285,6 +289,9 @@ public class Summary {
       
       for (Reference fieldRef : instance.getFields()) {
         findInvocationAsEffect(fieldRef.getInstance(), invocation, found, visited);
+        for (Instance oldInstance : fieldRef.getOldInstances()) {
+          findInvocationAsEffect(oldInstance, invocation, found, visited);
+        }
       }
     }
   }
@@ -372,7 +379,7 @@ public class Summary {
     // merge instance
     String argName = instance.getToppestInstance().getLastRefName();
     List<String> paramNames = argParamMap.get(argName);
-    
+
     // merge invocation to current
     for (String paramName : paramNames) {
       // XXX when there are multiple param for this argument, the invocation 
@@ -383,9 +390,11 @@ public class Summary {
         long invokeTime = Long.parseLong(invocation.getName().substring(invocation.getName().lastIndexOf('_') + 1));
         
         Instance translated = translateScope(invInstance, paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
-        mergeFieldEffect(instance, translated, invokeTime, null, translatedMap, mergedInstances, replaceMap);
+        if (instance != translated) {
+          mergeFieldEffect2(instance, translated, invokeTime, null, translatedMap, mergedInstances, replaceMap);
+          replaceMap.put(translated, instance);
+        }
         replaceMap.put(invInstance, instance);
-        replaceMap.put(translated, instance);
       }
     }
     
@@ -434,174 +443,7 @@ public class Summary {
       }
     }
   }
-  
-  private void mergeFieldEffect(Instance instanceTo, Instance instanceFrom, Long invokeTime, 
-      Hashtable<String, String> paramArgMap, Hashtable<Instance, Instance> translatedMap, 
-      HashSet<List<Instance>> mergedInstances, Hashtable<Instance, Instance> replaceMap) {
-    
-    // avoid redundant merge
-    List<Instance> instancePair = new ArrayList<Instance>();
-    instancePair.add(instanceTo);
-    instancePair.add(instanceFrom);
-    if (mergedInstances.contains(instancePair)) {
-      return;
-    }
-    else {
-      mergedInstances.add(instancePair);
-    }
-    
-    // merge each field
-    for (Reference fieldRef : instanceFrom.getFields()) {
-      // avoid copying v1_v1/v1_#!10 fields
-      if (fieldRef.getName().matches("v[0-9]+_(?:null|[v#][\\S]+)") && 
-          ((instanceTo.isBounded() || instanceFrom.isBounded()) || 
-          ((!instanceTo.getLastRefName().equals(instanceFrom.getLastRefName()) || (paramArgMap != null)) && 
-           instanceFrom.getLastRefName().contains("(")))) {
-        continue;
-      }
 
-      Instance fieldInstance = fieldRef.getInstance();
-      
-      // merge to instanceTo
-      Reference toField = instanceTo.getField(fieldRef.getName());
-      if (toField == null || instanceFrom == instanceTo /* latter case should only for translating FreshInstance or static field */) {
-
-        try {
-          Instance translated = translateScope(fieldInstance, 
-              paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
-          boolean lastRef = fieldInstance.getLastReference() == fieldRef;
-          instanceTo.setField(fieldRef.getName(), fieldRef.getType(), fieldRef.getCallSites(), translated, lastRef, true);
-          
-          // set the life time for translated in fieldRefTo
-          Reference fieldRefTo = instanceTo.getField(fieldRef.getName());
-          setInstanceLifeTime(fieldRefTo, fieldRef, translated, fieldInstance, invokeTime);
-          
-          // also merge in the old instance list
-          for (Instance oldInstance : fieldRef.getOldInstances()) {
-            try {
-              Instance translatedOld = translateScope(oldInstance, 
-                  paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
-              fieldRefTo.getOldInstances().add(translatedOld);
-              setInstanceLifeTime(fieldRefTo, fieldRef, translatedOld, oldInstance, invokeTime);
-              
-              if (oldInstance.getLastReference() == fieldRef) {
-                translatedOld.setLastReference(fieldRefTo);
-              }
-              
-              if (oldInstance != translatedOld) {
-                replaceMap.put(oldInstance, translatedOld); // oldInstance could exist in path condition list
-              }
-            } catch (NullPointerException e) {
-              // XXX bug
-            }
-          } 
-        } catch (NullPointerException e) {
-          // XXX bug
-        } 
-      }
-      else if (toField.getInstance().getLastReference() == toField) { // just a read field, merge together
-        Instance oldInstanceTo   = null;
-        Instance oldInstanceFrom = null;
-        for (Instance oldInstance : fieldRef.getOldInstances()) {
-          if (oldInstance.getLastReference() == fieldRef) {
-            oldInstanceFrom = oldInstance;
-            break;
-          }
-        }
-        for (Instance oldInstance : toField.getOldInstances()) {
-          if (oldInstance.getLastReference() == toField) {
-            oldInstanceTo = oldInstance;
-            break;
-          }
-        }
-        if (oldInstanceFrom != null) {
-          Instance translatedOldFrom = translateScope(oldInstanceFrom, 
-              paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
-          toField.getOldInstances().clear(); // the old list in fieldRef is earlier
-          toField.getOldInstances().add(translatedOldFrom);
-          setInstanceLifeTime(toField, fieldRef, translatedOldFrom, oldInstanceFrom, invokeTime);
-          
-          if (oldInstanceFrom.getLastReference() == fieldRef) {
-            translatedOldFrom.setLastReference(toField);
-          }
-        }
-        
-        Instance mergeTo = oldInstanceTo != null ? oldInstanceTo : toField.getInstance();
-        Instance translated = translateScope(fieldInstance, 
-            paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
-        
-        mergeFieldEffect(mergeTo, translated, invokeTime, null, translatedMap, mergedInstances, replaceMap);
-        replaceMap.put(fieldInstance, mergeTo); // fieldInstance could exist in path condition list
-        replaceMap.put(translated, mergeTo); // fieldInstance could exist in path condition list
-
-        // after merging field effects, mergeTo contains  all field effects of fieldInstance, 
-        // now need to set mergeTo to what it is (constant) or where from (v6)
-        if (fieldInstance.getLastReference() != fieldRef) {
-          setInstanceOrigin(mergeTo, translated, fieldRef, fieldInstance, replaceMap, invokeTime);
-        }
-      }
-      else { // even if cannot merge, put to oldInstances list
-        boolean noReadField = true;
-        if (toField.getOldInstances().size() > 0) {
-          Instance readField = null;
-          for (Instance oldInstance : toField.getOldInstances()) {
-            if (oldInstance.getLastReference() == toField) {
-              readField = oldInstance;
-              break;
-            }
-          }
-          
-          if (readField != null) { // read field is already overrided, merge to read field
-            Instance translated = translateScope(fieldInstance, 
-                paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
-            
-            mergeFieldEffect(readField, translated, invokeTime, null, translatedMap, mergedInstances, replaceMap);
-            replaceMap.put(fieldInstance, readField); // fieldInstance could exist in path condition list
-            replaceMap.put(translated, readField); // fieldInstance could exist in path condition list
-            
-            // after merging field effects, mergeTo contains all field effects of fieldInstance, 
-            // now need to set mergeTo to what it is (constant) or where from (v6)
-            if (fieldInstance.getLastReference() != fieldRef) {
-              setInstanceOrigin(readField, translated, fieldRef, fieldInstance, replaceMap, invokeTime);
-            }
-            noReadField = false;
-          }
-        }
-
-        if (noReadField) { // add read field to old list
-          Instance translated = translateScope(fieldInstance, 
-              paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
-          toField.getOldInstances().add(translated);
-          setInstanceLifeTime(toField, fieldRef, translated, fieldInstance, invokeTime);
-          
-          if (fieldInstance.getLastReference() == fieldRef) {
-            translated.setLastReference(toField);
-          }
-          
-          if (fieldInstance != translated) {
-            replaceMap.put(fieldInstance, translated); // fieldInstance could exist in path condition list
-          }
-        }
-        
-        // fieldRef.oldlist also needs to be handled
-        for (Instance oldInstance : fieldRef.getOldInstances()) {
-          Instance translatedOld = translateScope(oldInstance, 
-              paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
-          toField.getOldInstances().add(translatedOld);
-          setInstanceLifeTime(toField, fieldRef, translatedOld, oldInstance, invokeTime);
-          
-          if (oldInstance.getLastReference() == fieldRef) {
-            translatedOld.setLastReference(toField);
-          }
-          
-          if (oldInstance != translatedOld) {
-            replaceMap.put(oldInstance, translatedOld); // oldInstance could exist in path condition list
-          }
-        }
-      }
-    }
-  }
-  
   // the assign time to the instance fields are not decidable
   public void mergeFieldEffect2(Instance instanceTo, Instance instanceFrom, Long invokeTime, 
       Hashtable<String, String> paramArgMap, Hashtable<Instance, Instance> translatedMap, 
@@ -619,10 +461,9 @@ public class Summary {
     }
     
     // merge each field
-    for (Reference fieldRef : instanceFrom.getFields()) {
+    for (Reference fieldRef : new ArrayList<Reference>(instanceFrom.getFields())) {
       // avoid copying v1_v1/v1_#!10 fields
-      if (fieldRef.getName().matches("v[0-9]+_(?:null|[v#][\\S]+)") && 
-          ((instanceTo.isBounded() || instanceFrom.isBounded()) || 
+      if (isv1_v1(fieldRef) && ((instanceTo.isBounded() || instanceFrom.isBounded()) || 
           ((!instanceTo.getLastRefName().equals(instanceFrom.getLastRefName()) || 
            (paramArgMap != null)) && instanceFrom.getLastRefName().contains("(")))) {
         continue;
@@ -644,12 +485,12 @@ public class Summary {
         setInstanceLifeTime(fieldRefTo, fieldRef, translated, fieldInstance, invokeTime);
         
         // only doing it to set life time for sub-field instances 
-        if (!fieldRef.getName().startsWith("_undecidable_")) {
+        if (!is_undecidable_(fieldRef)) {
           setInstanceLifeTime(fieldRefTo, translated, invokeTime, new HashSet<List<Object>>());
         }
         
         // also merge in the old instance list
-        for (Instance oldInstance : fieldRef.getOldInstances()) {
+        for (Instance oldInstance : new ArrayList<Instance>(fieldRef.getOldInstances())) {
           Instance translatedOld = translateScope(oldInstance, 
               paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
           
@@ -765,7 +606,6 @@ public class Summary {
       }
     }
   }
-  
 
   // assuming toRef().getLastReference() != toField, i.e. there is at least one assignment already
   private void mergeReference2(Instance instanceTo, Reference fromRef, Reference toRef, Long invokeTime, 
@@ -773,9 +613,14 @@ public class Summary {
       HashSet<List<Instance>> mergedInstances, Hashtable<Instance, Instance> replaceMap) {
     
     Instance fieldInstance = fromRef.getInstance();
-    if (fieldInstance.getLastReference() == fromRef) {
+    boolean isHelperRef    = is_undecidable_(fromRef) || isv1_v1(fromRef);
+    if (fieldInstance.getLastReference() == fromRef /* just read */ || isHelperRef) {
+      // decide which instance to merge to
       Instance mergeTo = null;
-      if (!isAssignedEarlier(toRef, fromRef, toRef.getInstance(), fieldInstance, invokeTime)) {
+      if (isHelperRef) {
+        mergeTo = toRef.getInstance();
+      }
+      else if (!isAssignedEarlier(toRef, fromRef, toRef.getInstance(), fieldInstance, invokeTime)) {
         for (Instance oldInstance : toRef.getOldInstances()) {
           if (isAssignedEarlier(toRef, fromRef, oldInstance, fieldInstance, invokeTime)) {
             mergeTo = oldInstance;
@@ -787,13 +632,12 @@ public class Summary {
         mergeTo = toRef.getInstance();
       }
       
-      if (mergeTo == null) {
+      if (mergeTo == null) { // fieldInstance is the earliest
         Instance translated = translateScope(fieldInstance, 
             paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
         
         // field Reference in instanceTo may have been changed, get the current one
         toRef = instanceTo.getField(toRef.getName());
-        
         toRef.getOldInstances().add(translated);
         setInstanceLifeTime(toRef, fromRef, translated, fieldInstance, invokeTime);
         
@@ -806,7 +650,7 @@ public class Summary {
         }
       }
       else {
-        Instance translated = translateScope(fieldInstance, 
+        Instance translated = isHelperRef ? fieldInstance : translateScope(fieldInstance, 
             paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
         
         mergeFieldEffect2(mergeTo, translated, 
@@ -822,7 +666,6 @@ public class Summary {
         
         // field Reference in instanceTo may have been changed, get the current one
         toRef = instanceTo.getField(toRef.getName());
-        
         toRef.getOldInstances().add(translated);
         setInstanceLifeTime(toRef, fromRef, translated, fieldInstance, invokeTime);
         
@@ -831,13 +674,15 @@ public class Summary {
         }
 
         // XXX may not always correct?
-        List<Instance> oldInstances = new ArrayList<Instance>(toRef.getOldInstances());
-        for (Instance oldInstance : oldInstances) {
-          if (!isAssignedEarlier(toRef, fromRef, oldInstance, fieldInstance, invokeTime) && 
-              oldInstance.getLastReference() == toRef) { // it is a read field
-            mergeFieldEffect2(oldInstance, translated, 
-                invokeTime, null, translatedMap, mergedInstances, replaceMap);
-            setInstanceOrigin(oldInstance, translated, fromRef, fieldInstance, replaceMap, invokeTime);
+        if (!toRef.getOldInstances().contains(translated)) {
+          List<Instance> oldInstances = new ArrayList<Instance>(toRef.getOldInstances());
+          for (Instance oldInstance : oldInstances) {
+            if (!isAssignedEarlier(toRef, fromRef, oldInstance, fieldInstance, invokeTime) && 
+                oldInstance.getLastReference() == toRef) { // it is a read field
+              mergeFieldEffect2(oldInstance, translated, 
+                  invokeTime, null, translatedMap, mergedInstances, replaceMap);
+              setInstanceOrigin(oldInstance, translated, fromRef, fieldInstance, replaceMap, invokeTime);
+            }
           }
         }
       }
@@ -856,7 +701,7 @@ public class Summary {
       }
       
       // deal with the old list in fromRef 
-      for (Instance oldInstance : fromRef.getOldInstances()) {
+      for (Instance oldInstance : new ArrayList<Instance>(fromRef.getOldInstances())) {
         Instance translatedOld = translateScope(oldInstance, 
             paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
         
@@ -868,33 +713,35 @@ public class Summary {
         
         // XXX may not always correct?
         if (oldInstance.getLastReference() == fromRef) { // toRef's read becomes fromRef's latest before set
-          // try to find the latest override in toRef
-          long latestSetTime = Long.MIN_VALUE;
-          Instance latestSetInstance = null;
-          List<Instance> oldInstances = new ArrayList<Instance>(toRef.getOldInstances());
-          for (Instance oldInstance2 : oldInstances) {
-            if (isAssignedEarlier(toRef, fromRef, oldInstance2, oldInstance, invokeTime) && 
-                oldInstance2.getLastReference() != toRef && oldInstance2 != translatedOld) { // it is a set field
-              if (toRef.getLifeTime(oldInstance2)[0] > latestSetTime) {
-                latestSetTime = toRef.getLifeTime(oldInstance2)[0];
-                latestSetInstance = oldInstance2;
+          if (!toRef.getOldInstances().contains(translatedOld)) {
+            // try to find the latest override in toRef
+            long latestSetTime = Long.MIN_VALUE;
+            Instance latestSetInstance = null;
+            for (Instance oldInstance2 : new ArrayList<Instance>(toRef.getOldInstances())) {
+              if (isAssignedEarlier(toRef, fromRef, oldInstance2, oldInstance, invokeTime) && 
+                  oldInstance2.getLastReference() != toRef && oldInstance2 != translatedOld) { // it is a set field
+                if (toRef.getLifeTime(oldInstance2)[0] > latestSetTime) {
+                  latestSetTime = toRef.getLifeTime(oldInstance2)[0];
+                  latestSetInstance = oldInstance2;
+                }
               }
             }
-          }
-          
-          if (latestSetInstance != null) { // found the latest set before this read
-            setInstanceOrigin(translatedOld, latestSetInstance, toRef, latestSetInstance, replaceMap, invokeTime);
-          }
-          else { // no override set
-            translatedOld.setLastReference(toRef);
+            
+            if (latestSetInstance != null) { // found the latest set before this read
+              setInstanceOrigin(translatedOld, latestSetInstance, toRef, latestSetInstance, replaceMap, invokeTime);
+            }
+            else { // no override set
+              translatedOld.setLastReference(toRef);
+            }
           }
         }
         else { // fromRef's earliest after read becomes toRef's set
-          List<Instance> oldInstances = new ArrayList<Instance>(toRef.getOldInstances());
-          for (Instance oldInstance2 : oldInstances) {
-            if (!isAssignedEarlier(toRef, fromRef, oldInstance2, oldInstance, invokeTime) && 
-                oldInstance2.getLastReference() == toRef && oldInstance2 != translatedOld) { // it is a read field
-              setInstanceOrigin(oldInstance2, translatedOld, fromRef, oldInstance, replaceMap, invokeTime);
+          if (!toRef.getOldInstances().contains(translatedOld)) {
+            for (Instance oldInstance2 : new ArrayList<Instance>(toRef.getOldInstances())) {
+              if (!isAssignedEarlier(toRef, fromRef, oldInstance2, oldInstance, invokeTime) && 
+                  oldInstance2.getLastReference() == toRef && oldInstance2 != translatedOld) { // it is a read field
+                setInstanceOrigin(oldInstance2, translatedOld, fromRef, oldInstance, replaceMap, invokeTime);
+              }
             }
           }
         }
@@ -926,17 +773,21 @@ public class Summary {
       return;
     }
     
-    if (invokeTime != null) {
+    if (invokeTime != null) {      
       ref.resetInstanceLiftTime(instance, invokeTime, Long.MAX_VALUE /* not useful in Summary */);
       setted.add(toSet);
       
       // merge each field
       for (Reference fieldRef : instance.getFields()) {
         // avoid copying v1_v1/v1_#!10 fields
-        if (fieldRef.getName().matches("v[0-9]+_(?:null|[v#][\\S]+)")) {
+        if (isv1_v1(fieldRef)) {
           continue;
         }
-        setInstanceLifeTime(fieldRef, fieldRef.getInstance(), invokeTime, setted);
+
+        // only doing it to set life time for sub-field instances 
+        if (!is_undecidable_(fieldRef)) {
+          setInstanceLifeTime(fieldRef, fieldRef.getInstance(), invokeTime, setted);
+        }
         
         // also the old instance list
         for (Instance oldInstance : fieldRef.getOldInstances()) {
@@ -1027,7 +878,7 @@ public class Summary {
       
       Reference lastRef = instance.getLastReference();
       if (lastRef != null && lastRef.getName().contains("_") && 
-          lastRef.getName().contains(".") && !lastRef.getName().startsWith("_undecidable_")) {
+          lastRef.getName().contains(".") && !is_undecidable_(lastRef)) {
         try {
           Long.parseLong(lastRef.getName().substring(lastRef.getName().lastIndexOf("_") + 1));
           found.add(lastRef);
@@ -1585,6 +1436,14 @@ public class Summary {
       }
     }
     return freshNotNullTerm;
+  }
+  
+  private static boolean is_undecidable_(Reference ref) {
+    return ref.getName().startsWith("_undecidable_");
+  }
+  
+  private static boolean isv1_v1(Reference ref) {
+    return ref.getName().matches("v[0-9]+_(?:null|[v#][\\S]+)");
   }
   
   private final List<Condition>              m_pathCondition;
