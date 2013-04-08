@@ -25,7 +25,7 @@ import java.util.List;
 public class MethodListSorter {
 
   public MethodListSorter(String appJar, String pseudoImplJar) throws Exception {
-    m_forwardExecutor = new ForwardExecutor(appJar, pseudoImplJar, new CompleteForwardHandler(), new SMTChecker(SOLVERS.YICES));
+    m_forwardExecutor = new ForwardExecutor(appJar, pseudoImplJar, new CompleteForwardHandler(), new SMTChecker(SOLVERS.Z3));
     m_intraSummaryDatabase = new SummaryDatabase("./intra_summaries/", 20, m_forwardExecutor.getWalaAnalyzer());
   }
   

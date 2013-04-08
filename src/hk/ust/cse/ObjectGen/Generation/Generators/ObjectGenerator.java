@@ -40,7 +40,7 @@ public class ObjectGenerator extends AbstractGenerator {
     m_maxStep         = maxStep;
     m_findMoreValues  = findMoreValues;
     m_filterMethods   = filterMethods;
-    m_smtChecker      = new SMTChecker(SOLVERS.YICES);
+    m_smtChecker      = new SMTChecker(SOLVERS.Z3);
     //m_selector      = new SimpleMethodSelector(m_maxSelect);
     m_selector        = new FieldMethodSelector(m_walaAnalyzer, pseudoImplJarFile != null, accessibility);
     m_summaryDatabase = new SummaryDatabase(summaryDBPath, 20, m_walaAnalyzer);
@@ -176,7 +176,7 @@ public class ObjectGenerator extends AbstractGenerator {
             }
           }
           Summary summary = summarySelector.nextSummary(prevSatReqs);
-
+          
           Hashtable<Long, String> prevHashCodeVarMap = 
               (Hashtable<Long, String>) m_allTypeGenerator.getHashCodeVarMap().clone();
           

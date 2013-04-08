@@ -29,7 +29,7 @@ import com.ibm.wala.ssa.IR;
 public class IntraSummaryExtractor {
 
   public IntraSummaryExtractor(String appJar, String pseudoImplJar) throws Exception {
-    m_executor = new ForwardExecutor(appJar, pseudoImplJar, new CompleteForwardHandler(), new SMTChecker(SOLVERS.YICES));
+    m_executor = new ForwardExecutor(appJar, pseudoImplJar, new CompleteForwardHandler(), new SMTChecker(SOLVERS.Z3));
     m_intraSummaryDatabase = new SummaryDatabase("./intra_summaries/", 20, m_executor.getWalaAnalyzer());
     
     // load jar file, _removed.jar version is for faster call graph construction. Since it may 

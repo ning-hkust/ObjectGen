@@ -1236,7 +1236,7 @@ public class Summary {
       String relName = lines[current++];
       int domainDim  = Integer.parseInt(lines[current++]);
       boolean direction = Boolean.parseBoolean(lines[current++]);
-      Relation relation = new Relation(relName, domainDim, direction);
+      Relation relation = new Relation(relName, domainDim, direction, new String[] {"not_null_reference", "I"}, "Unknown-Type");
       
       List<Instance[]> domainValuesList = relation.getDomainValues();
       List<Instance>   rangeValueList   = relation.getRangeValues();

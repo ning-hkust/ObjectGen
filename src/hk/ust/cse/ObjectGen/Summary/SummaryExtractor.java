@@ -5,9 +5,9 @@ import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm;
 import hk.ust.cse.Prevision.PathCondition.Condition;
 import hk.ust.cse.Prevision.PathCondition.ConditionTerm;
 import hk.ust.cse.Prevision.PathCondition.Formula;
-import hk.ust.cse.Prevision.PathCondition.Formula.SMT_RESULT;
 import hk.ust.cse.Prevision.PathCondition.TypeConditionTerm;
 import hk.ust.cse.Prevision.Solver.SMTChecker;
+import hk.ust.cse.Prevision.Solver.SolverLoader.SOLVER_RESULT;
 import hk.ust.cse.Prevision.VirtualMachine.AbstractMemory;
 import hk.ust.cse.Prevision.VirtualMachine.Instance;
 import hk.ust.cse.Prevision.VirtualMachine.Reference;
@@ -295,8 +295,8 @@ public class SummaryExtractor {
               //SMT_RESULT result = s_executor.getSMTChecker().smtCheck(formula, true, true, false);
               try {
                 // for performance reason, we only do simple check
-                SMT_RESULT result = m_smtChecker.simpleCheck(formula);
-                if (result.equals(SMT_RESULT.SAT)) { // only add the satisfiable ones
+                SOLVER_RESULT result = m_smtChecker.simpleCheck(formula);
+                if (result.equals(SOLVER_RESULT.SAT)) { // only add the satisfiable ones
                   expandedInvocation.add(expandedInv);
                 }
               } catch (Throwable e) {
@@ -321,8 +321,8 @@ public class SummaryExtractor {
     for (int i = 0; i < lastExpanded.size(); i++) {
       Formula formula = createValidatingFormula(lastExpanded.get(i));
       try {
-        SMT_RESULT result = m_smtChecker.smtCheck(formula, true, false, false, true, false, false);
-        if (!result.equals(SMT_RESULT.SAT)) {
+        SOLVER_RESULT result = m_smtChecker.smtCheck(formula, true, false, false, true, false, false);
+        if (!result.equals(SOLVER_RESULT.SAT)) {
           lastExpanded.remove(i--);
         }
       } catch (Throwable e) {
@@ -617,7 +617,7 @@ public class SummaryExtractor {
       String relName = (String) keys.nextElement();
       Relation relation = relationMap.get(relName);
       Relation translatedRel = new Relation(relation.getName(), 
-          relation.getDomainDimension(), relation.getDirection());
+          relation.getDomainDimension(), relation.getDirection(), relation.getDomainTypes(), relation.getRangeType());
       List<Instance[]> domainValuesList = translatedRel.getDomainValues();
       List<Instance>   rangeValueList   = translatedRel.getRangeValues();
       List<Long>      functionTimeList  = translatedRel.getFunctionTimes();
@@ -814,7 +814,7 @@ public class SummaryExtractor {
       String relName = (String) keys.nextElement();
       Relation relation = relationMap.get(relName);
       Relation replacedRel = new Relation(relation.getName(), 
-          relation.getDomainDimension(), relation.getDirection());
+          relation.getDomainDimension(), relation.getDirection(), relation.getDomainTypes(), relation.getRangeType());
       List<Instance[]> domainValuesList = replacedRel.getDomainValues();
       List<Instance>   rangeValueList   = replacedRel.getRangeValues();
       List<Long>      functionTimeList  = replacedRel.getFunctionTimes();

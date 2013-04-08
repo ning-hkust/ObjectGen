@@ -353,8 +353,10 @@ public class Requirements {
     if (objType.equals("Ljava/lang/String") && (fieldName.equals("count") || fieldName.equals("offset"))) {
       fieldType = "I";
     }
-    else if (fieldName.equals("size") || fieldName.equals("count") || 
-             fieldName.equals("current") || fieldName.equals("length")) {
+    else if (fieldName.equals("size") || fieldName.equals("count") || fieldName.equals("current")) {
+      fieldType = "I";
+    }
+    else if (objType.startsWith("[") && fieldName.equals("length")) {
       fieldType = "I";
     }
     else if (fieldName.equals("__table__")) {

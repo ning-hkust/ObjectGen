@@ -10,9 +10,10 @@ import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm.Comparator;
 import hk.ust.cse.Prevision.PathCondition.Condition;
 import hk.ust.cse.Prevision.PathCondition.ConditionTerm;
 import hk.ust.cse.Prevision.PathCondition.Formula;
-import hk.ust.cse.Prevision.PathCondition.Formula.SMT_RESULT;
 import hk.ust.cse.Prevision.PathCondition.TypeConditionTerm;
+import hk.ust.cse.Prevision.Solver.NeutralInput;
 import hk.ust.cse.Prevision.Solver.SMTChecker;
+import hk.ust.cse.Prevision.Solver.SolverLoader.SOLVER_RESULT;
 import hk.ust.cse.Prevision.VirtualMachine.AbstractMemory;
 import hk.ust.cse.Prevision.VirtualMachine.Instance;
 import hk.ust.cse.Prevision.VirtualMachine.Instance.INSTANCE_OP;
@@ -54,8 +55,8 @@ public class ParamReqDeductor {
     // encode 1) summary path condition + 2) summary effect + 3) requirement conditions
     Object[] created = createValidatingFormula(summary, req);
     Formula validateFormula = (Formula) created[0];
-    SMT_RESULT result = m_smtChecker.smtCheck(validateFormula, false, true, false, true, true, true);
-    if (!result.equals(SMT_RESULT.SAT)) {
+    SOLVER_RESULT result = m_smtChecker.smtCheck(validateFormula, false, true, false, true, true, true);
+    if (!result.equals(SOLVER_RESULT.SAT)) {
       return null;
     }
     
@@ -315,58 +316,62 @@ public class ParamReqDeductor {
 
     // remove unnecessary updates obtained from summary
     removeUselessUpdates(conditionList, sizeBeforeReqConds, relationMap);
-    
+
+    // add cast-ables not equal conditions (especially useful when one variable is a super class of another)
     HashSet<Instance> usedInstances = findUsedInstances(conditionList, sizeBeforeReqConds, relationMap);
-    
-    // add same type not equal conditions
-    keys = typeInstanceMap.keys();
-    while (keys.hasMoreElements()) {
-      String type = (String) keys.nextElement();
-      HashSet<Instance> instances = typeInstanceMap.get(type);
-      List<Instance> instanceList = new ArrayList<Instance>(instances);
-      for (int i = 0, size = instanceList.size(); i < size; i++) {
-        Instance instance1 = instanceList.get(i);
-        if (usedInstances.contains(instance1)) {
-          for (int j = i + 1; j < size; j++) {
-            Instance instance2 = instanceList.get(j);
-            if (usedInstances.contains(instance2)) {
-              if (instance1 != instance2 && !instance1.toString().equals(instance2.toString())) {
-                BinaryConditionTerm condTerm = new BinaryConditionTerm(instance1, Comparator.OP_INEQUAL, instance2);
-                conditionList.add(new Condition(condTerm));
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    // add parameters not equal conditions (especially useful when one parameter is a super class of another)
-    Instance nullInstance = new Instance("null", "", null);
-    for (int i = 1; i <= summary.getMethodData().getParamList().size(); i++) {
-      Instance instance1 = effect.get("v" + i).getInstance();
-      if (usedInstances.contains(instance1)) {
-        if (!Utils.isPrimitiveType(instance1.getLastRefType())) {
-          for (int j = i + 1; j <= summary.getMethodData().getParamList().size(); j++) {
-            Instance instance2 = effect.get("v" + j).getInstance();
-            if (usedInstances.contains(instance2)) {
-              if (!Utils.isPrimitiveType(instance2.getLastRefType())) {
-                if (!instance1.toString().equals(instance2.toString())) {
-                  List<ConditionTerm> condTerms = new ArrayList<ConditionTerm>();
-                  condTerms.add(new BinaryConditionTerm(instance1, Comparator.OP_EQUAL, nullInstance));
-                  condTerms.add(new BinaryConditionTerm(instance2, Comparator.OP_EQUAL, nullInstance));
-                  condTerms.add(new BinaryConditionTerm(instance1, Comparator.OP_INEQUAL, instance2));
-                  conditionList.add(new Condition(condTerms));
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    conditionList.addAll(createNotEqualConditions(usedInstances));
     
     // translate to Formula
     Formula formula = new Formula(conditionList, new AbstractMemory(refMap, null, relationMap));
     return new Object[] {formula, instanceMap};
+  }
+
+  // add cast-ables not equal conditions (especially useful when one variable is a super class of another)
+  private List<Condition> createNotEqualConditions(HashSet<Instance> instances) {
+    List<Condition> conditionList = new ArrayList<Condition>();
+    
+    // find the instances which need to add in-equal
+    HashSet<Instance> objInstances = new HashSet<Instance>();
+    for (Instance instance : instances) {
+      findAddNotNullInstances(instance, objInstances);
+    }
+    List<Instance> instanceList = new ArrayList<Instance>(objInstances);
+    
+    Instance nullInstance = new Instance("null", "", null);
+    for (int i = 0, size = instanceList.size(); i < size; i++) {
+      Instance instance1 = instanceList.get(i);
+      String type1 = instance1.getLastRefType();
+      if (!Utils.isPrimitiveType(type1)) {
+        for (int j = i + 1; j < size; j++) {
+          Instance instance2 = instanceList.get(j);
+          String type2 = instance2.getLastRefType();
+          if (!Utils.isPrimitiveType(type2)) {
+            if (!instance1.toString().equals(instance2.toString()) && 
+                (Utils.canCastTo(type1, type2) || Utils.canCastTo(type2, type1))) {
+              List<ConditionTerm> condTerms = new ArrayList<ConditionTerm>();
+              condTerms.add(new BinaryConditionTerm(instance1, Comparator.OP_EQUAL, nullInstance));
+              condTerms.add(new BinaryConditionTerm(instance2, Comparator.OP_EQUAL, nullInstance));
+              condTerms.add(new BinaryConditionTerm(instance1, Comparator.OP_INEQUAL, instance2));
+              conditionList.add(new Condition(condTerms));
+            }
+          }
+        }
+      }
+    }
+
+    return conditionList;
+  }
+  
+  private void findAddNotNullInstances(Instance instance, HashSet<Instance> objInstances) {
+    if (!instance.isBounded()) {
+      if (!instance.toString().equals("v9999")) {
+        objInstances.add(instance);
+      }
+    }
+    else if (!instance.isAtomic()) {
+      findAddNotNullInstances(instance.getLeft(), objInstances);
+      findAddNotNullInstances(instance.getRight(), objInstances);
+    }
   }
   
   private HashSet<Instance> findUsedInstances(List<Condition> conditionList, 
@@ -506,7 +511,10 @@ public class ParamReqDeductor {
         String fullFieldName = reference.getLongName(); // v1.next
         Relation relation = relationMap.get(fieldName);
         if (relation == null) {
-          relation = new Relation(fieldName, 1, true);
+          String fieldType = reference.getType();
+          String declType  = reference.getDeclaringInstance().getLastReference() != null ? 
+              reference.getDeclaringInstance().getLastRefType() : reference.getDeclaringInstance().getType();
+          relation = new Relation(fieldName, 1, true, new String[] {declType}, fieldType);
           relationMap.put(fieldName, relation);
         }
         
@@ -555,7 +563,8 @@ public class ParamReqDeductor {
     String relName = summaryRelation.getName();
     Relation relation = relationMap.get(relName);
     if (relation == null) {
-      relation = new Relation(relName, summaryRelation.getDomainDimension(), summaryRelation.getDirection());
+      relation = new Relation(relName, summaryRelation.getDomainDimension(), 
+          summaryRelation.getDirection(), summaryRelation.getDomainTypes(), summaryRelation.getRangeType());
       relationMap.put(relName, relation);
     }
     
@@ -613,7 +622,12 @@ public class ParamReqDeductor {
         if (relationInstance == null) {
           Relation relation = relationMap.get(fieldName);
           if (relation == null) {
-            relation = new Relation(fieldName, 1, true);
+            String fieldType = nonRelationInstance.getLastReference().getType();
+            String declType  = nonRelationInstance.getLastReference().getDeclaringInstance().getLastReference() != null ? 
+                nonRelationInstance.getLastReference().getDeclaringInstance().getLastRefType() : 
+                nonRelationInstance.getLastReference().getDeclaringInstance().getType();
+            declType = declType != null ? declType : "not_null_reference";
+            relation = new Relation(fieldName, 1, true, new String[] {declType}, fieldType);
             relationMap.put(fieldName, relation);
           }
           
@@ -653,7 +667,7 @@ public class ParamReqDeductor {
 
         Relation relation = relationMap.get("@@array");
         if (relation == null) {
-          relation = new Relation("@@array", 2, true);
+          relation = new Relation("@@array", 2, true, new String[] {"not_null_reference", "I"}, "Unknown-Type");
           relationMap.put("@@array", relation);
         }
         
@@ -725,6 +739,11 @@ public class ParamReqDeductor {
            !lastRef.getName().startsWith("java.lang.Class.")) { // give a wild card to java.lang.Class.
           // e.g.: java.util.Arrays.copyOf([Ljava/lang/Object;I)[Ljava/lang/Object;_482682480861585
           nonParamStaticTerms.add(binarySatModelTerm);
+          continue;
+        }
+        
+        // the "reference object" of a static field
+        if (lastRef.getName().startsWith("L")) { // Lorg/apache/commons/collections/functors/ExceptionClosure
           continue;
         }
         
@@ -1155,7 +1174,6 @@ public class ParamReqDeductor {
     return requirements;
   }
   
-
   @SuppressWarnings("unchecked")
   private List<Condition> findMoreValuesAll(List<Condition> origSatModel, Summary origSummary, 
       Requirement origReq, int numOfSmaller, int numOfLargerEqual) {
@@ -1163,46 +1181,65 @@ public class ParamReqDeductor {
     // get the original generated model values
     Object[] targets = findMoreValueTargets(origSatModel, origSummary);
     Hashtable<Instance, Instance> targetInstances     = (Hashtable<Instance, Instance>) targets[0];
+    Hashtable<Instance, Instance> nonTargetInstances  = (Hashtable<Instance, Instance>) targets[2];
     Hashtable<Instance, Condition> newSatModelMapping = (Hashtable<Instance, Condition>) targets[3];
     
     // find the original model values for target instances
     boolean allFieldReadFound = true;
-    List<Instance> targetInstanceList   = new ArrayList<Instance>();
-    List<Condition> origValueConditions = new ArrayList<Condition>();
+    List<Instance> targetInstanceList      = new ArrayList<Instance>();
+    List<Condition> origValueConditions    = new ArrayList<Condition>();
+    List<Condition> origValueConditionsFix = new ArrayList<Condition>();
     Hashtable<Instance, Instance> solverFormulaInstanceMap = new Hashtable<Instance, Instance>();
     Hashtable<Instance, Integer> origModelValueInts = new Hashtable<Instance, Integer>();
-    Enumeration<Instance> keys = targetInstances.keys();
+    
+    
+    // put both targetInstances and nonTargetInstances
+    Hashtable<Instance, Instance> allIntInstances = new Hashtable<Instance, Instance>(targetInstances);
+    Enumeration<Instance> keys = nonTargetInstances.keys();
     while (keys.hasMoreElements() && allFieldReadFound) {
-      Instance targetInstance = (Instance) keys.nextElement();
-      Instance origModelValue = targetInstances.get(targetInstance);
+      Instance key = (Instance) keys.nextElement();
+      allIntInstances.put(key, nonTargetInstances.get(key));
+    }
+    
+    // create origValueConditions
+    keys = allIntInstances.keys();
+    while (keys.hasMoreElements() && allFieldReadFound) {
+      Instance intInstance    = (Instance) keys.nextElement();
+      Instance origModelValue = allIntInstances.get(intInstance);
       
       // get the original model value
       if (origModelValue != null && origModelValue.getValue().startsWith("#!")) {
         try {
           Integer origModelInt = Integer.parseInt(origModelValue.getValueWithoutPrefix());
-          origModelValueInts.put(targetInstance, origModelInt);
+          origModelValueInts.put(intInstance, origModelInt);
 
           // create condition
-          String fullName     = targetInstance.toString();
+          String fullName     = intInstance.toString();
           String[] fieldNames = fullName.split("\\.");
 
           allFieldReadFound = false;
           if (fieldNames.length > 0) {
-            String currentName = fieldNames[0]; // v1
+            String currentName  = fieldNames[0]; // v1
             Reference reference = origSummary.getEffect().get(currentName);
             if (reference == null) { // e.g.: java.util.Arrays.copyOf([Ljava/lang/Object;I)[Ljava/lang/Object;_482682480861585.length
               allFieldReadFound = true;
               continue; // not related to parameters anyway
             }
             
-            Instance fieldRead = findFieldRead(origSummary, targetInstance);
+            Instance fieldRead = findFieldRead(origSummary, intInstance);
             if (fieldRead != null) {
-              solverFormulaInstanceMap.put(targetInstance, fieldRead);
-              targetInstanceList.add(targetInstance);
               // create condition
-              BinaryConditionTerm term = new BinaryConditionTerm(
-                  fieldRead, BinaryConditionTerm.Comparator.OP_EQUAL, origModelValue);
-              origValueConditions.add(new Condition(term));
+              Condition condition = new Condition(new BinaryConditionTerm(
+                  fieldRead, BinaryConditionTerm.Comparator.OP_EQUAL, origModelValue));
+              origValueConditions.add(condition);
+              
+              if (targetInstances.containsKey(intInstance)) {
+                targetInstanceList.add(intInstance);
+                solverFormulaInstanceMap.put(intInstance, fieldRead);
+              }
+              else {
+                origValueConditionsFix.add(condition);
+              }
               allFieldReadFound = true;
             }
           }
@@ -1214,44 +1251,48 @@ public class ParamReqDeductor {
       // create the basic formula that has the definitions
       origSummary.getPathConditions().addAll(origValueConditions);
       Object[] created = createValidatingFormula(origSummary, origReq);
-      Formula validateFormula = (Formula) created[0];
+      Formula ctxFormula = (Formula) created[0];
       Hashtable<Instance, Instance> instanceMap = (Hashtable<Instance, Instance>) created[1];
       origSummary.getPathConditions().removeAll(origValueConditions);
       
       // find the conditions corresponding to the origValueConditions in validateFormula
-      List<Condition> validateConditions = new ArrayList<Condition>();
+      List<Condition> origValueConditionsToFind = new ArrayList<Condition>();
       for (Condition condition : origValueConditions) {
+        if (origValueConditionsFix.contains(condition)) {
+          continue;
+        }
         BinaryConditionTerm binaryTerm = (BinaryConditionTerm) condition.getConditionTerms().get(0);
         Instance instance1 = binaryTerm.getInstance1();
         Instance instance2 = binaryTerm.getInstance2();
-        for (int i = validateFormula.getConditionList().size() - 1; i >= 0; i--) {
-          Condition condition2 = validateFormula.getConditionList().get(i);
+        for (int i = ctxFormula.getConditionList().size() - 1; i >= 0; i--) {
+          Condition condition2 = ctxFormula.getConditionList().get(i);
           if (condition2.getConditionTerms().size() == 1 && 
               condition2.getConditionTerms().get(0) instanceof BinaryConditionTerm) {
             BinaryConditionTerm binaryTerm2 = (BinaryConditionTerm) condition2.getConditionTerms().get(0);
             if (binaryTerm2.getComparator() == BinaryConditionTerm.Comparator.OP_EQUAL) {
               if (instanceMap.get(instance1) == binaryTerm2.getInstance1() && 
                   instance2.getValue().equals(binaryTerm2.getInstance2().getValue())) {
-                validateConditions.add(condition2);
+                origValueConditionsToFind.add(condition2);
                 break;
               }
             }
           }
         }
       }
-      validateFormula.getConditionList().removeAll(validateConditions);
+      ctxFormula.getConditionList().removeAll(origValueConditionsToFind);
 
-      // create and prepare the context
-      int ctx = m_smtChecker.createContext();
-      m_smtChecker.smtChecksInContext(ctx, validateFormula, null, true, false, false, true, false, false);
+      // create and prepare the context storage
+      Object ctxStorage = m_smtChecker.getSolverLoader().createContextStorage();
+      m_smtChecker.smtCheckInContext(ctxStorage, ctxFormula, true, false, false, true, false, false);
       
       // try all combinations
+      NeutralInput ctxInput = m_smtChecker.getLastSolverInput().getNeutralInput();
       List<List<Condition>> satisfiables = new ArrayList<List<Condition>>();
-      findMoreValuesAllRec(ctx, satisfiables, null, targetInstanceList, validateConditions, 
-          0, origModelValueInts, solverFormulaInstanceMap, numOfSmaller, numOfLargerEqual, true);
+      findMoreValuesAllRec(ctxStorage, ctxFormula, ctxInput, satisfiables, null, targetInstanceList, 
+          origValueConditionsToFind, 0, origModelValueInts, solverFormulaInstanceMap, numOfSmaller, numOfLargerEqual, true);
       
-      // delete context
-      m_smtChecker.deleteContext(ctx);
+      // delete context storage
+      m_smtChecker.getSolverLoader().deleteContextStorage(ctxStorage);
       
       // obtain the values that are satisfiable
       for (int i = 0, size = satisfiables.size(); i < size && i < 20 /* only take maximum of 20 */; i++) {
@@ -1328,26 +1369,20 @@ public class ParamReqDeductor {
   }
   
   @SuppressWarnings("unchecked")
-  private void findMoreValuesAllRec(int ctx, List<List<Condition>> satisiables, List<Condition> prevConditions, 
-      List<Instance> targetInstances, List<Condition> validateConditions, int currIndex, 
-      Hashtable<Instance, Integer> origModelValueInts, Hashtable<Instance, Instance> solverFormulaInstanceMap, 
-      int numOfSmaller, int numOfLargerEqual, boolean equalOrig) {
+  private void findMoreValuesAllRec(Object ctxStorage, Formula ctxFormula, NeutralInput ctxInput, 
+      List<List<Condition>> satisiables, List<Condition> prevConditions, List<Instance> targetInstances, 
+      List<Condition> validateConditions, int currInstanceIndex, Hashtable<Instance, Integer> origModelValueInts, 
+      Hashtable<Instance, Instance> solverFormulaInstanceMap, int numOfSmaller, int numOfLargerEqual, boolean equalOrig) {
     
-    Instance targetInstance = targetInstances.get(currIndex);
+    Instance targetInstance = targetInstances.get(currInstanceIndex);
     int origModelInt = origModelValueInts.get(targetInstance);
     Instance formulaInstance = solverFormulaInstanceMap.get(targetInstance);
 
     // try (orig - n1) ... (orig + n2)
     for (int i = 0; i < (numOfSmaller + numOfLargerEqual); i++) {
       // new value we want to check
-      Instance newValue = null;
-      if (i < numOfSmaller) {
-        newValue = new Instance("#!" + (origModelInt - (numOfSmaller - i)), "I", null);
-      }
-      else {
-        newValue = new Instance("#!" + (origModelInt + (i - numOfSmaller)), "I", null);
-      }
-      
+      Instance newValue = (i < numOfSmaller) ? new Instance("#!" + (origModelInt - (numOfSmaller - i)), "I", null) : 
+                                               new Instance("#!" + (origModelInt + (i - numOfSmaller)), "I", null);
       equalOrig &= (i == numOfSmaller);
       
       // create condition
@@ -1368,200 +1403,38 @@ public class ParamReqDeductor {
       // before go any further, check if the current conditions can be satisfy
 
       // create validateCtxConditions from currConditions
-      List<List<Condition>> validateCtxConditions = new ArrayList<List<Condition>>();
       List<Condition> validateConditions2 = new ArrayList<Condition>();
       for (int j = 0, size = currConditions.size(); j < size; j++) {
         BinaryConditionTerm binaryTerm1 = (BinaryConditionTerm) currConditions.get(j).getConditionTerms().get(0);
         BinaryConditionTerm binaryTerm2 = (BinaryConditionTerm) validateConditions.get(j).getConditionTerms().get(0);
-        
         validateConditions2.add(new Condition(new BinaryConditionTerm(
             binaryTerm2.getInstance1(), binaryTerm1.getComparator(), binaryTerm1.getInstance2())));
       }
-      validateCtxConditions.add(validateConditions2);
 
+      // restore context
+      m_smtChecker.getSolverLoader().popContextStorage(ctxStorage);
+      m_smtChecker.getSolverLoader().pushContextStorage(ctxStorage);
+      
       // check with SMT solver
-      Object[] results = m_smtChecker.smtChecksInContext(
-          ctx, null, validateCtxConditions, true, false, false, true, false, false);
-      List<SMT_RESULT> smtCheckResults = (List<SMT_RESULT>) results[1];
+      SOLVER_RESULT smtCheckResult = m_smtChecker.smtCheckInContext(
+          ctxStorage, ctxFormula, ctxInput, validateConditions2, true, false, false, true, false, false);
 
       // good to continue
-      if (smtCheckResults.get(0) == SMT_RESULT.SAT) {
-        if (currIndex >= targetInstances.size() - 1) {
+      if (smtCheckResult == SOLVER_RESULT.SAT) {
+        if (currInstanceIndex >= targetInstances.size() - 1) {
           if (!equalOrig) {
             satisiables.add(currConditions);
           }
         }
         else {
-          findMoreValuesAllRec(ctx, satisiables, currConditions, targetInstances, validateConditions, 
-              currIndex + 1, origModelValueInts, solverFormulaInstanceMap, numOfSmaller, numOfLargerEqual, equalOrig);
+          findMoreValuesAllRec(ctxStorage, ctxFormula, ctxInput, satisiables, currConditions, 
+              targetInstances, validateConditions, currInstanceIndex + 1, origModelValueInts, 
+              solverFormulaInstanceMap, numOfSmaller, numOfLargerEqual, equalOrig);
         }
       }
     }
   }
   
-  // this method finds more values for each integer fields SEPERATELY
-  @SuppressWarnings({ "unchecked", "unused" })
-  private List<Condition> findMoreValuesSeperate(List<Condition> origSatModel, Summary origSummary, 
-      Requirement origReq, int numOfSmaller, int numOfLarger) {
-
-    // get the original generated model values
-    Object[] targets = findMoreValueTargets(origSatModel, origSummary);
-    Hashtable<Instance, Instance> targetInstances     = (Hashtable<Instance, Instance>) targets[0];
-    Hashtable<String, Instance> targetInstanceNames   = (Hashtable<String, Instance>) targets[1];
-    Hashtable<Instance, Instance> nonTargetInstances  = (Hashtable<Instance, Instance>) targets[2];
-    Hashtable<Instance, Condition> newSatModelMapping = (Hashtable<Instance, Condition>) targets[3];
-    
-    // addition checks to obtain more model values
-    Enumeration<Instance> keys = targetInstances.keys();
-    while (keys.hasMoreElements()) {
-      Instance targetInstance = (Instance) keys.nextElement();
-      Instance origModelValue = targetInstances.get(targetInstance);
-      
-      // get the original model value
-      Integer origModelInt = null;
-      if (origModelValue != null && origModelValue.getValue().startsWith("#!")) {
-        try {
-          origModelInt = Integer.parseInt(origModelValue.getValueWithoutPrefix());
-        } catch (Exception e) {}
-      }
-      if (origModelInt == null) {
-        continue;
-      }
-
-      // try (orig - n1) ... (orig + n2)
-      for (int i = 0; i < (numOfSmaller + numOfLarger); i++) {
-        Hashtable<Instance, Instance> fixValues = (Hashtable<Instance, Instance>) nonTargetInstances.clone();
-        
-        // new value we want to check
-        Instance newValue = null;
-        if (i < numOfSmaller) {
-          newValue = new Instance("#!" + (origModelInt - (numOfSmaller - i)), "I", null);
-        }
-        else {
-          newValue = new Instance("#!" + (origModelInt + (i - numOfSmaller) + 1), "I", null);
-        }
-        fixValues.put(targetInstance, newValue); // add fix value
-
-        // create the new summary for checking
-        boolean allFixesPushed = true;
-        List<Condition> pushedConditions = new ArrayList<Condition>();
-        
-        Enumeration<Instance> keys2 = fixValues.keys();
-        while (keys2.hasMoreElements() && allFixesPushed) {
-          Instance key2       = (Instance) keys2.nextElement();
-          Instance value      = fixValues.get(key2);
-          String fullName     = key2.toString();
-          String[] fieldNames = fullName.split("\\.");
-
-          allFixesPushed = false;
-          if (fieldNames.length > 0) {
-            String currentName = fieldNames[0]; // v1
-            Reference reference = origSummary.getEffect().get(currentName);
-            if (reference == null) { // e.g.: java.util.Arrays.copyOf([Ljava/lang/Object;I)[Ljava/lang/Object;_482682480861585.length
-              allFixesPushed = true;
-              continue; // not related to parameters anyway
-            }
-            
-            Instance fieldRead = findFieldRead(origSummary, key2);
-            if (fieldRead != null) {
-              // add fix value as path condition
-              BinaryConditionTerm term = new BinaryConditionTerm(
-                  fieldRead, BinaryConditionTerm.Comparator.OP_EQUAL, value);
-              Condition condition = new Condition(term);
-              
-              origSummary.getPathConditions().add(condition);
-              pushedConditions.add(condition);
-              allFixesPushed = true;
-            }
-          }
-        }
-
-        if (allFixesPushed) {
-          // encode 1) summary path condition + 2) summary effect + 3) requirement conditions
-          Object[] created = createValidatingFormula(origSummary, origReq);
-          Formula validateFormula = (Formula) created[0];
-          SMT_RESULT result = m_smtChecker.smtCheck(validateFormula, false, true, false, true, false, true);
-          if (result.equals(SMT_RESULT.SAT)) {
-            // parse satModel
-            List<Condition> newConditionList = new ArrayList<Condition>();
-            List<BinaryConditionTerm> nonParamTerms = new ArrayList<BinaryConditionTerm>();
-            parseSatModel(m_smtChecker.getLastResult().getSatModel(), 
-                newConditionList, nonParamTerms, false, validateFormula);
-
-            // obtain the new model values for each instances
-            Hashtable<Instance, Instance> newValuesMap = new Hashtable<Instance, Instance>();
-            for (Condition condition : newConditionList) {
-              ConditionTerm term = condition.getConditionTerms().get(0);
-              if (term instanceof BinaryConditionTerm) {
-                BinaryConditionTerm binaryTerm = (BinaryConditionTerm) term;
-                
-                String instanceName = binaryTerm.getInstance1().toString();
-                Instance instance = targetInstanceNames.get(instanceName);
-                if (instance != null) {
-                  newValuesMap.put(instance, binaryTerm.getInstance2());
-                }
-              }
-            }
-
-            // append new values
-            Enumeration<Instance> keys3 = targetInstances.keys();
-            while (keys3.hasMoreElements()) {
-              Instance key3 = (Instance) keys3.nextElement();
-              
-              Condition condition = newSatModelMapping.get(key3);
-              BinaryConditionTerm binaryTerm = (BinaryConditionTerm) condition.getConditionTerms().get(0);
-              
-              // append new value to the previous model values
-              Instance prevModelValues = binaryTerm.getInstance2();
-              String prevModelValuesStr = prevModelValues.getValue();
-              
-              String newModelValuesStr = prevModelValuesStr + "|";
-              if (newValuesMap.get(key3) == null) {
-                newModelValuesStr += prevModelValuesStr.substring(
-                    prevModelValuesStr.lastIndexOf("|") + 1, prevModelValuesStr.length());
-              }
-              else {
-                newModelValuesStr += newValuesMap.get(key3).getValue();
-              }
-              
-              // create a new condition for the new value
-              BinaryConditionTerm term = new BinaryConditionTerm(binaryTerm.getInstance1(), binaryTerm.getComparator(), 
-                  new Instance(newModelValuesStr, "I", null));
-              Condition newCondition = new Condition(term);
-              newSatModelMapping.put(key3, newCondition);
-            }
-            
-            System.out.println("More value: " + targetInstance + ": " + newValue);
-          }
-        }
-        
-        // remove the pushed conditions
-        origSummary.getPathConditions().removeAll(pushedConditions);
-      }
-    }
-
-    // create the new SatModel
-    List<Condition> newSatModel = new ArrayList<Condition>();
-    for (Condition condition : origSatModel) {
-      ConditionTerm term = condition.getConditionTerms().get(0);
-      if (term instanceof BinaryConditionTerm) { // otherwise they are v1.field != null
-        BinaryConditionTerm binaryTerm = (BinaryConditionTerm) term;
-        Condition newCondition = newSatModelMapping.get(binaryTerm.getInstance1());
-        if (newCondition != null) {
-          newSatModel.add(newCondition);
-        }
-        else {
-          newSatModel.add(condition);
-        }
-      }
-      else {
-        newSatModel.add(condition);
-      }
-    }
-    
-    return newSatModel;
-  }
-
   private Instance findFieldRead(Summary origSummary, Instance instance) {
     Instance fieldRead = null;
     

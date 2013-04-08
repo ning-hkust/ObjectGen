@@ -22,7 +22,7 @@ import com.ibm.wala.classLoader.IMethod;
 public class MethodListExtractor {
 
   public MethodListExtractor(String appJar, String pseudoImplJar) throws Exception {
-    m_executor = new ForwardExecutor(appJar, pseudoImplJar, new CompleteForwardHandler(), new SMTChecker(SOLVERS.YICES));
+    m_executor = new ForwardExecutor(appJar, pseudoImplJar, new CompleteForwardHandler(), new SMTChecker(SOLVERS.Z3));
   }
   
   public void produceNotExtractMethodList(List<String> allowPrefix) {
