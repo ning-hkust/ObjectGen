@@ -40,7 +40,7 @@ public class FieldMethodSelector extends AbstractMethodSelector {
     // get target field names
     HashSet<String> fieldNames = new HashSet<String>();
     Instance topInstance = req.getTargetInstance();
-    findRelatedFieldNames(topInstance, fieldNames);
+    findRelatedFieldNames(topInstance, fieldNames, new HashSet<Instance>());
 
     String typeName = req.getTargetInstance().getLastRefType();
     Hashtable<String, List<Object[]>> setFields = findFieldSet(typeName);
@@ -112,11 +112,22 @@ public class FieldMethodSelector extends AbstractMethodSelector {
   }
   
   // find related fields that need to be satisfy
-  private void findRelatedFieldNames(Instance instance, HashSet<String> fieldNames) {
+  private void findRelatedFieldNames(Instance instance, HashSet<String> fieldNames, HashSet<Instance> visited) {
+    if (visited.contains(instance)) {
+      return;
+    }
+    visited.add(instance);
+    
     if (!instance.isBounded()) {
       String declClass = instance.getLastRefType();
       String declClassJavaString = Utils.getClassTypeJavaStr(declClass);
       for (Reference fieldRef : instance.getFields()) {
+        if (fieldRef.getName().contains(".")) {
+          // due to bugs in summary extraction, there could be fields like: 
+          // org.apache.commons.collections.Predicate.evaluate(Ljava/lang/Object;)Z_969578746583694
+          continue;
+        }
+        
         if (fieldRef.getName().equals("__table__")) {
           fieldNames.add("hk.ust.cse.Prevision_PseudoImpl.Map.__table__");
           fieldNames.add("hk.ust.cse.Prevision_PseudoImpl.Table.__table__");
@@ -137,7 +148,7 @@ public class FieldMethodSelector extends AbstractMethodSelector {
           }
           
           // find sub fields
-          findRelatedFieldNames(fieldRef.getInstance(), fieldNames);
+          findRelatedFieldNames(fieldRef.getInstance(), fieldNames, visited);
         }
       }
     }
@@ -159,7 +170,7 @@ public class FieldMethodSelector extends AbstractMethodSelector {
                                                              ((Constructor<?>) member2).getParameterTypes();
           boolean allEasy1 = allEasyParams(params1);
           boolean allEasy2 = allEasyParams(params2);
-          if (allEasy1 && allEasy2) {
+          if ((allEasy1 && allEasy2) || (!allEasy1 && !allEasy2)) {
             return params1.length - params2.length;
           }
           else {

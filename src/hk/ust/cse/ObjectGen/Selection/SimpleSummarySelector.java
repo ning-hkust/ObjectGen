@@ -17,14 +17,25 @@ public class SimpleSummarySelector extends AbstractSummarySelector {
     // obtain the immediate fields in req
     List<List<String>> targetFields = objGenerator.getTargetFields(req);
     
-    m_summaries = new ArrayList<Summary>();
+    List<Summary> loadSummaries = new ArrayList<Summary>();
     for (Summary summary : summaries) {
       // check if this summary can potentially modify the target fields in req
       if (isSummaryUseful(summary, req, targetFields, ir) && 
          !isSummaryBadSize(summary, req, targetFields, ir)) {
-        m_summaries.add(summary);
+        loadSummaries.add(summary);
       }
     }
+    
+//    // sort by the number of conditions
+//    Collections.sort(loadSummaries, new Comparator<Summary>() {
+//      @Override
+//      public int compare(Summary o1, Summary o2) {
+//        return o1.getPathConditions().size() - o2.getPathConditions().size();
+//      }
+//    });
+    
+    // load at most 500
+    m_summaries = loadSummaries.size() > 500 ? loadSummaries.subList(0, 500) : loadSummaries;
   }
   
   @Override

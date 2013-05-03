@@ -9,6 +9,7 @@ import hk.ust.cse.ObjectGen.Generation.TestCase.Sequence;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Variable;
 import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm;
 import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm.Comparator;
+import hk.ust.cse.Prevision.PathCondition.Condition;
 import hk.ust.cse.Prevision.VirtualMachine.Instance;
 import hk.ust.cse.Prevision.VirtualMachine.Instance.INSTANCE_OP;
 import hk.ust.cse.Prevision.VirtualMachine.Reference;
@@ -18,7 +19,6 @@ import hk.ust.cse.Wala.WalaUtils;
 import hk.ust.cse.util.Utils;
 
 import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -30,17 +30,16 @@ public class Generator {
 
   public Generator(String appJar, 
                    String pseudoImplJarFile, 
-                   String summaryDBPath, 
+                   String javaSummaryDBPath, 
+                   String otherSummaryDBPath, 
                    HashSet<String> filterMethods, 
                    int maxStep, 
                    int maxSubClasses, 
-                   int accessibility, 
-                   int[] findMoreValues, 
+                   int accessibility,  
                    boolean allowStaticNotSat) throws Exception {
     
     m_maxStep           = maxStep;
     m_maxSubClasses     = maxSubClasses;
-    m_accessibility     = accessibility;
     m_allowStaticNotSat = allowStaticNotSat;
     m_walaAnalyzer      = new WalaAnalyzer(appJar);
     m_satCache          = new SatisfiedReqCache();
@@ -57,7 +56,7 @@ public class Generator {
 
     m_arrayGenerator       = new ArrayGenerator(this, accessibility);
     m_simpleGenerator      = new SimpleGenerator(this, accessibility);
-    m_objectGenerator      = new ObjectGenerator(this, accessibility, maxStep, findMoreValues, pseudoImplJarFile, summaryDBPath, filterMethods);
+    m_objectGenerator      = new ObjectGenerator(this, accessibility, maxStep, pseudoImplJarFile, javaSummaryDBPath, otherSummaryDBPath, filterMethods);
     m_assignFieldGenerator = new AssignFieldGenerator(this, accessibility);
   }
   
@@ -118,7 +117,7 @@ public class Generator {
       }
       
       // in case all fields are accessible, try to directly set these fields
-      if (genSequence == null && allFieldsAccessible(req)) {
+      if (genSequence == null && m_assignFieldGenerator.allFieldsAccessible(req)) {
         genSequence = m_assignFieldGenerator.generate(req, ancestorReqs);
       }
       
@@ -164,7 +163,7 @@ public class Generator {
 
     // try to generate sequence for each child requirement
     keys = childReqs.keys();
-    while (keys.hasMoreElements() && !genResult.hasNotSat()) {
+    while (keys.hasMoreElements() && !genResult.hasNotSat() && !getStopFlag()) {
       String varName = (String) keys.nextElement();
       Requirement childReq = childReqs.getRequirement(varName);
       
@@ -213,20 +212,22 @@ public class Generator {
   private Object handleHashCodeHack(Requirement req) {
     Object ret = null;
     
-    for (int i = 0; i < req.getRequirementTerms().size(); i++) {
-      Instance instance1 = req.getRequirementTerm(i).getInstance1();
+    for (int i = 0; i < req.getConditions().size(); i++) {
+      BinaryConditionTerm binaryTerm = req.getConditions().get(i).getOnlyBinaryTerm();
+      if (binaryTerm == null) {
+        continue;
+      }
       
-      // v9999.__hashcode__ == #!0
-      if (!instance1.isBounded() && instance1.getLastRefName().equals("__hashcode__")) {
+      Instance instance1 = binaryTerm.getInstance1();
+      if (!instance1.isBounded() && instance1.getLastRefName().equals("__hashcode__")) { // v9999.__hashcode__ == #!0
         Instance declInstance = instance1.getLastReference().getDeclaringInstance();
         if (declInstance == req.getTargetInstance()) { // v9999.__hashCode__
-          Instance instance2 = req.getRequirementTerm(i).getInstance2();
-          long modelValue = Long.parseLong(instance2.getValueWithoutPrefix());
+          long modelValue = Long.parseLong(binaryTerm.getInstance2().getValueWithoutPrefix());
           if (modelValue < 0) {
             // if v9999.__hashCode__ < 0, that means we don't want to find any 
             // element from Map by key v9999. Thus, creating a new Object for v1 
             // (v1 != null) will work just find
-            req.getRequirementTerms().remove(i--);
+            req.getConditions().remove(i--);
           }
           else {
             String varForThisValue = m_hashCodeVarMap.get(modelValue);
@@ -239,7 +240,7 @@ public class Generator {
               ret = sequence;
             }
             else { // remove the v9999.__hashcode__ == #!0 condition, mark down what hash code this object is for
-              req.getRequirementTerms().remove(i--);
+              req.getConditions().remove(i--);
               ret = modelValue;
             }
           }
@@ -254,9 +255,14 @@ public class Generator {
     
     // remove terms with "__table__" and Hashtable.size == 0 as 
     // the real object we try to create won't have these fields
-    for (int i = 0; i < req.getRequirementTerms().size(); i++) {
-      Instance instance1 = req.getRequirementTerm(i).getInstance1();
-      Instance instance2 = req.getRequirementTerm(i).getInstance2();
+    for (int i = 0; i < req.getConditions().size(); i++) {
+      BinaryConditionTerm binaryTerm = req.getConditions().get(i).getOnlyBinaryTerm();
+      if (binaryTerm == null) {
+        continue;
+      }
+      
+      Instance instance1 = binaryTerm.getInstance1();
+      Instance instance2 = binaryTerm.getInstance2();
       
       // Hashtable does not have size field, the field is only used by the pseudo class
       if (instance1.getLastReference() != null && instance1.getLastRefName().equals("size") && 
@@ -266,14 +272,14 @@ public class Generator {
         typeName = (typeName == null && instance1.getLastReference().getDeclaringInstance().getLastReference() != null) ? 
             instance1.getLastReference().getDeclaringInstance().getLastRefType() : typeName;
         if (typeName != null && typeName.contains("Hashtable")) {
-          req.getRequirementTerms().remove(i--);
+          req.getConditions().remove(i--);
           continue;
         }
       }
       
       while (instance1 != null && instance1.getLastReference() != null) {
         if (instance1.getLastRefName().equals("__table__")) { // __table__ won't exist the real object type
-          req.getRequirementTerms().remove(i--);
+          req.getConditions().remove(i--);
           break;
         }
         instance1 = instance1.getLastReference().getDeclaringInstance();
@@ -291,46 +297,7 @@ public class Generator {
     return ret;
   }
   
-  private boolean allFieldsAccessible(Requirement req) {
-    boolean allAccessible = true;
-    
-    HashSet<String> checked = new HashSet<String>();
-    Class<?> targetType = Utils.findClass(req.getTargetInstance().getLastRefType());
-    for (int i = 0, size = req.getRequirementTerms().size(); i < size && allAccessible; i++) {
-      BinaryConditionTerm binaryTerm = req.getRequirementTerm(i);
-      Instance instance1 = binaryTerm.getInstance1();
-      
-      if (instance1.isBounded() && instance1.getRight() != null) { // (v9999.appenderList.elementData @ #!0)
-        instance1 = instance1.getLeft();
-      }
-      
-      // v9999 != null, skip
-      if (instance1.getLastReference().getDeclaringInstance() == null) {
-        continue;
-      }
-      
-      // find the first level field
-      Instance fieldInstance   = null;
-      Instance currentInstance = instance1;
-      while (currentInstance.getLastReference().getDeclaringInstance() != null) {
-        fieldInstance   = currentInstance;
-        currentInstance = currentInstance.getLastReference().getDeclaringInstance();
-        if (currentInstance.isBounded() && currentInstance.getRight() != null) { // (v9999.appenderList.elementData @ #!0)
-          currentInstance = currentInstance.getLeft();
-        }
-      }
-      
-      // check field
-      String fieldName = fieldInstance.getLastRefName();
-      if (!checked.contains(fieldName)) {
-        Field field = Utils.findClassField(targetType, fieldName);
-        allAccessible &= field != null && ((m_accessibility == 0 && Modifier.isPublic(field.getModifiers())) || 
-                                           (m_accessibility == 1 && !Modifier.isPrivate(field.getModifiers())));
-      }
-    }
-    
-    return allAccessible;
-  }
+
   
 
   private List<String> sortSubClasses(String superClass, List<String> subClasses, int maxSubClasses) {
@@ -455,13 +422,13 @@ public class Generator {
     BinaryConditionTerm term2 = new BinaryConditionTerm(fieldList.getInstance(), Comparator.OP_INEQUAL, instanceNull);
     BinaryConditionTerm term3 = new BinaryConditionTerm(array, Comparator.OP_INEQUAL, instanceNull);
     Requirement req = new Requirement(target.getInstance().getLastRefName());
-    req.addRequirementTerm(term1);
-    req.addRequirementTerm(term2);
-    req.addRequirementTerm(term3);
+    req.addCondition(new Condition(term1));
+    req.addCondition(new Condition(term2));
+    req.addCondition(new Condition(term3));
     req.setTargetInstance(target.getInstance(), false);
     
-    Generator generator = new Generator("./hk.ust.cse.ObjectGen.jar", "./summaries/", 
-        "./lib/hk.ust.cse.Prevision_PseudoImpl.jar", new HashSet<String>(), 5, 1, 1, new int[] {0, 0}, true);
+    Generator generator = new Generator("./hk.ust.cse.ObjectGen.jar", "./java_summaries/", "./summaries/", 
+        "./lib/hk.ust.cse.Prevision_PseudoImpl.jar", new HashSet<String>(), 5, 1, 1, true);
     Sequence sequence = generator.generate(req, new VarNamePool(), new Hashtable<Long, String>());
     if (sequence != null) {
       System.out.println(sequence.toString());
@@ -471,19 +438,18 @@ public class Generator {
     }
   }
   
-  private boolean                      m_stopFlag;
-  private VarNamePool                  m_varNamePool;
-  private Hashtable<Long, String>      m_hashCodeVarMap;
-  private final int                    m_maxStep;
-  private final int                    m_maxSubClasses;
-  private final int                    m_accessibility;
-  private final boolean                m_allowStaticNotSat;
-  private final WalaAnalyzer           m_walaAnalyzer;
-  private final SatisfiedReqCache      m_satCache;
-  private final UnsatisfiedReqCache    m_unsatCache;
+  private boolean                    m_stopFlag;
+  private VarNamePool                m_varNamePool;
+  private Hashtable<Long, String>    m_hashCodeVarMap;
+  private final int                  m_maxStep;
+  private final int                  m_maxSubClasses;
+  private final boolean              m_allowStaticNotSat;
+  private final WalaAnalyzer         m_walaAnalyzer;
+  private final SatisfiedReqCache    m_satCache;
+  private final UnsatisfiedReqCache  m_unsatCache;
 
-  private final ArrayGenerator         m_arrayGenerator;
-  private final SimpleGenerator        m_simpleGenerator;
-  private final ObjectGenerator        m_objectGenerator;
-  private final AssignFieldGenerator   m_assignFieldGenerator;
+  private final ArrayGenerator       m_arrayGenerator;
+  private final SimpleGenerator      m_simpleGenerator;
+  private final ObjectGenerator      m_objectGenerator;
+  private final AssignFieldGenerator m_assignFieldGenerator;
 }

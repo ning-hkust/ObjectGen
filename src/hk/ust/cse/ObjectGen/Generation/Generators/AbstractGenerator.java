@@ -7,13 +7,15 @@ import hk.ust.cse.ObjectGen.Generation.TestCase.Sequence;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Statement;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Variable;
 import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm;
-import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm.Comparator;
+import hk.ust.cse.Prevision.PathCondition.Condition;
+import hk.ust.cse.Prevision.PathCondition.ConditionTerm;
 import hk.ust.cse.Prevision.VirtualMachine.Instance;
 import hk.ust.cse.Wala.WalaAnalyzer;
 import hk.ust.cse.util.Utils;
 
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public abstract class AbstractGenerator {
@@ -35,6 +37,10 @@ public abstract class AbstractGenerator {
     if (term != null) {
       Instance instance1 = term.getInstance1();
       Instance instance2 = term.getInstance2();
+      if (instance1.isConstant()) { // null != v1
+        instance1 = term.getInstance2();
+        instance2 = term.getInstance1();
+      }
       
       // instance1 should always be not bounded: v1, v1.field
       if (instance1.getLastReference().getDeclaringInstance() == null) { // v1
@@ -55,7 +61,7 @@ public abstract class AbstractGenerator {
           }
         }
         else { // v1 ==/!= null
-          if (term.getComparator() == Comparator.OP_EQUAL && instance2.getValue().equals("null")) {
+          if (term.isEqualToNull()) {
             String typeName2 = typeName;
             Class<?> clazz = Utils.findClass(typeName);
             if (clazz != null && Modifier.isProtected(clazz.getModifiers())) {
@@ -64,7 +70,7 @@ public abstract class AbstractGenerator {
             }
             assignFrom = new Variable("null", typeName2);
           }
-          else if (term.getComparator() == Comparator.OP_INEQUAL && instance2.getValue().equals("null")) {
+          else if (term.isNotEqualToNull()) {
             if (typeName.equals("Ljava/lang/Class")) {
               assignFrom = new Variable("int.class", typeName);
             }
@@ -93,49 +99,69 @@ public abstract class AbstractGenerator {
   
   private BinaryConditionTerm getReqirementTerm(Requirement req) {
     BinaryConditionTerm reqTerm = null;
-    if (req.getRequirementTerms().size() == 1) {
-      reqTerm = req.getRequirementTerm(0);
+    if (req.getConditions().size() == 1) {
+      reqTerm = req.getCondition(0).getOnlyBinaryTerm();
     }
     else {
-      for (BinaryConditionTerm term : req.getRequirementTerms()) {
-        if (term.toString().startsWith("v9999 == ##")) {
-          reqTerm = term;
+      for (Condition reqCond : req.getConditions()) {
+        BinaryConditionTerm binaryTerm = reqCond.getOnlyBinaryTerm();
+        if (binaryTerm != null && binaryTerm.toString().startsWith("v9999 == ##")) {
+          reqTerm = binaryTerm;
           break;
         }
       }
     }
     return reqTerm;
   }
-  
+
+  // obtain the fields in req
   public List<List<String>> getTargetFields(Requirement req) {
     List<List<String>> targetFields = new ArrayList<List<String>>();
     
-    for (BinaryConditionTerm term : req.getRequirementTerms()) {
-      List<String> targetFieldLink = new ArrayList<String>();
-      Instance currentInstance = term.getInstance1();
-      
-      //XXX unsound in cases of array: (v9999.elementData @ 0).field != null
-      
-      while (currentInstance != null && currentInstance.getLastReference() != null && 
-             currentInstance.getLastReference().getDeclaringInstance() != null) {
-        String fieldName = currentInstance.getLastRefName();
-        targetFieldLink.add(0, fieldName);
+    for (Condition condition : req.getConditions()) {
+      for (ConditionTerm term : condition.getConditionTerms()) {
+        for (Instance instance : term.getInstances()) {
+          //XXX unsound in cases of array: (v9999.elementData @ 0).field != null
 
-        currentInstance = currentInstance.getLastReference().getDeclaringInstance();
-      }
-      if (targetFieldLink.size() > 0) {
-        targetFields.add(targetFieldLink);
+          String[] fieldNames = instance.getDeclFieldNames();
+          if (fieldNames.length > 0) {
+            targetFields.add(Arrays.asList(fieldNames));
+          }
+        }
       }
     }
     return targetFields;
   }
   
-  public boolean onlyVarNotNullReq(Requirement req) {
-    boolean onlyVarNotNullReq = false;
-    if (req != null && req.getRequirementTerms().size() == 1) {
-      onlyVarNotNullReq = req.getRequirementTerm(0).toString().equals("v9999 != null");
+  public boolean onlyVarNullReq(Requirement req, String varName) {
+    return onlyVarNullOrNotNullReq(req, varName, false);
+  }
+  
+  public boolean onlyVarNotNullReq(Requirement req, String varName) {
+    return onlyVarNullOrNotNullReq(req, varName, true);
+  }
+  
+  private boolean onlyVarNullOrNotNullReq(Requirement req, String varName, boolean notNull) {
+    // ignore type conditions
+    List<Condition> nonTypeConditions = new ArrayList<Condition>();
+    for (Condition condition : req.getConditions()) {
+      if (condition.getOnlyTypeTerm() == null) {
+        nonTypeConditions.add(condition);
+      }
     }
-    return onlyVarNotNullReq;
+
+    boolean onlyVarNullOrNotNullReq = false;
+    if (nonTypeConditions.size() > 0) {
+      onlyVarNullOrNotNullReq = true;
+      String comp = notNull ? " != " : " == ";
+      for (int i = 0, size = nonTypeConditions.size(); i < size && onlyVarNullOrNotNullReq; i++) {
+        BinaryConditionTerm term = nonTypeConditions.get(i).getOnlyBinaryTerm();
+        String termStr = term != null ? term.toString() : null;
+        onlyVarNullOrNotNullReq &= termStr != null && 
+            (termStr.equals(varName + comp + "null") || termStr.equals("null" + comp + varName));
+      }
+    }
+    return onlyVarNullOrNotNullReq;
   }
   
   public WalaAnalyzer getWalaAnalyzer() {

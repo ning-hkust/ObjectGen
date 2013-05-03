@@ -7,6 +7,7 @@ import hk.ust.cse.ObjectGen.Generation.TestCase.AssignmentStatement;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Sequence;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Variable;
 import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm;
+import hk.ust.cse.Prevision.PathCondition.Condition;
 import hk.ust.cse.Prevision.VirtualMachine.Instance;
 import hk.ust.cse.Prevision.VirtualMachine.Reference;
 import hk.ust.cse.util.Utils;
@@ -37,7 +38,12 @@ public class ArrayGenerator extends AbstractGenerator {
       int length = 1;
       String arrayTypeName     = null;
       String arrayTypeJavaName = null;
-      for (BinaryConditionTerm term : req.getRequirementTerms()) {
+      for (Condition condition : req.getConditions()) {
+        BinaryConditionTerm term = condition.getOnlyBinaryTerm();
+        if (term == null) {
+          continue;
+        }
+        
         Instance instance1 = term.getInstance1();
         Instance instance2 = term.getInstance2();
         if (!instance1.isBounded() && !instance1.hasDeclaringInstance()) { // v1 != null
@@ -70,10 +76,11 @@ public class ArrayGenerator extends AbstractGenerator {
             while (currentTop != null && isIndexInstance) {
               Requirement childReq = requirementsMap.get(currentTop);
               if (childReq != null) {
-                childReq.addRequirementTerm(term);
+                childReq.addCondition(condition);
                 isIndexInstance = false;
               }
               else {
+                topInstance = currentTop.getRight() != null ? currentTop : topInstance;
                 currentTop = currentTop.getLeft();
                 currentTop = currentTop != null ? currentTop.getToppestInstance() : currentTop;
               }
@@ -83,7 +90,7 @@ public class ArrayGenerator extends AbstractGenerator {
             }
             
             // try to get the index
-            String indexValue = topInstance.getRight().getValue();
+            String indexValue = topInstance.getRight().computeArithmetic();
             Instance instance = indexInstanceMap.get(indexValue);
             if (instance == null) {
               instance = new Instance("", null);
@@ -104,6 +111,13 @@ public class ArrayGenerator extends AbstractGenerator {
                     fieldRef.getCallSites(), fieldRef.getInstances(), true, true);
               }
             }
+            else {
+              // convert (v1 @ #1) to v9999, such that it becomes a non-array problem
+              for (Reference fieldRef : topInstance.getFields()) {
+                instance.setField(fieldRef.getName(), fieldRef.getType(), 
+                    fieldRef.getCallSites(), fieldRef.getInstances(), true, true);
+              }
+            }
             
             Requirement childReq = requirementsMap.get(instance);
             if (childReq == null) {
@@ -116,12 +130,12 @@ public class ArrayGenerator extends AbstractGenerator {
             if (instance1 == topInstance) {
               term = new BinaryConditionTerm(instance, term.getComparator(), instance2);
             }
-            childReq.addRequirementTerm(term);
+            childReq.addCondition(new Condition(term));
           }
           else { // v9999.field1 == #!1
             Requirement childReq = requirementsMap.get(topInstance);
             if (childReq != null) {
-              childReq.addRequirementTerm(term);
+              childReq.addCondition(new Condition(term));
             }
           }
         }

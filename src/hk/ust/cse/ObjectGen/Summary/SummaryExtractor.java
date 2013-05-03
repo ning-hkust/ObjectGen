@@ -44,7 +44,7 @@ public class SummaryExtractor {
     m_intraExtractor  = new IntraSummaryExtractor(appJar, pseudoImplJar);
     m_walaAnalyzer    = m_intraExtractor.getWalaAnalyzer();
     m_smtChecker      = m_intraExtractor.getExecutor().getSMTChecker();
-    m_summaryDatabase = new SummaryDatabase("./summaries/", 20, m_walaAnalyzer);
+    m_summaryDatabase = new SummaryDatabase("./java_summaries/", "./summaries/", 20, m_walaAnalyzer);
     
     // load jar file, _removed.jar version is for faster call graph construction. Since it may 
     // be missing some classes (e.g. UnknownElement), we should use the full version in classloader
@@ -318,7 +318,8 @@ public class SummaryExtractor {
     
     // since we are using simple check instead of full SMT check during merging, it is possible 
     // that there might be unsatisfiable ones in the final list, do one more round of full SMT check
-    for (int i = 0; i < lastExpanded.size(); i++) {
+    System.out.print("Perferming last full check (" + lastExpanded.size() + "): ");
+    for (int i = 0, checked = 0; i < lastExpanded.size(); i++, checked++) {
       Formula formula = createValidatingFormula(lastExpanded.get(i));
       try {
         SOLVER_RESULT result = m_smtChecker.smtCheck(formula, true, false, false, true, false, false);
@@ -329,7 +330,9 @@ public class SummaryExtractor {
         // XXX bug
         lastExpanded.remove(i--);
       }
+      System.out.print((checked + 1) + (((checked + 1) % 10 == 0) ? "\n" : " "));
     }
+    System.out.println();
     
     return lastExpanded;
   }
@@ -1038,10 +1041,10 @@ public class SummaryExtractor {
     List<String> fullExtractList    = new ArrayList<String>();
     List<String> partialExtractList = new ArrayList<String>();
     List<String> failedExtractList  = new ArrayList<String>();
-    BufferedWriter writer0 = new BufferedWriter(new FileWriter("./summaries/summary_progress.txt", false));
-    BufferedWriter writer1 = new BufferedWriter(new FileWriter("./summaries/full_extract_methods.txt", false));
-    BufferedWriter writer2 = new BufferedWriter(new FileWriter("./summaries/partial_extract_methods.txt", false));
-    BufferedWriter writer3 = new BufferedWriter(new FileWriter("./summaries/failed_extract_methods.txt", false));
+    BufferedWriter writer0 = new BufferedWriter(new FileWriter("./summary_progress.txt", false));
+    BufferedWriter writer1 = new BufferedWriter(new FileWriter("./full_extract_methods.txt", false));
+    BufferedWriter writer2 = new BufferedWriter(new FileWriter("./partial_extract_methods.txt", false));
+    BufferedWriter writer3 = new BufferedWriter(new FileWriter("./failed_extract_methods.txt", false));
     for (int i = 0, size = methodsToExtract.size(); i < size; i++) {
       String methodSig = methodsToExtract.get(i);
       
@@ -1141,8 +1144,8 @@ public class SummaryExtractor {
       //String appJar = "D:/Projects/BranchModelGenerator/targets/apache-commons-collections/target/commons-collections-3.2.1.jar";
       //String appJar = "D:/Projects/BranchModelGenerator/targets/sat4j/target/org.sat4j.core-2.2.0.jar";
       //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-ant/targets/ant-all-1.7.0_removed.jar";
-      //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-log4j/targets/log4j-1.2.15_removed.jar";
-      String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-commons-collections/targets/commons-collections-3.1.jar";
+      String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-log4j/targets/log4j-1.2.15_removed.jar";
+      //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-commons-collections/targets/commons-collections-3.1.jar";
       //String appJar = "D:/Projects/ObjectGen/hk.ust.cse.ObjectGen.jar";
       String pseudoImplJar = "./lib/hk.ust.cse.Prevision_PseudoImpl.jar";
       SummaryExtractor extractor = new SummaryExtractor(appJar, pseudoImplJar);
@@ -1166,7 +1169,7 @@ public class SummaryExtractor {
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.remove(I)Lorg/apache/commons/collections/list/TreeList$AVLNode");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList.get(I)Ljava/lang/Object;");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList.remove(I)Ljava/lang/Object;");
-      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.insert(ILjava/lang/Object;)Lorg/apache/commons/collections/list/TreeList$AVLNode;");
+      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.insert(ILjava/lang/Object;)Lorg/apache/commons/collections/list/TreeList$AVLNode;");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.insertOnLeft(ILjava/lang/Object;)Lorg/apache/commons/collections/list/TreeList$AVLNode;");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.insertOnRight(ILjava/lang/Object;)Lorg/apache/commons/collections/list/TreeList$AVLNode;");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList.add(ILjava/lang/Object;)V");
@@ -1177,7 +1180,7 @@ public class SummaryExtractor {
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$TreeListIterator.next()Ljava/lang/Object;");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.iterators.ObjectGraphIterator.findNextByIterator(Ljava/util/Iterator;)V");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.iterators.ObjectGraphIterator.next()Ljava/lang/Object;");
-      //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.sat4j.minisat.constraints.cnf.LearntHTClause.<init>(Lorg/sat4j/specs/IVecInt;Lorg/sat4j/minisat/core/ILits;)V");
+      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "java.lang.Double.toHexString(D)Ljava/lang/String;");
       
       // read the list of all/filter/extracted methods
       HashSet<String> allMethodSet = Utils.readStringSetFromFile("./summaries/all_methods.txt");

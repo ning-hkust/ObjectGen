@@ -4,6 +4,7 @@ import hk.ust.cse.ObjectGen.Generation.Generator;
 import hk.ust.cse.ObjectGen.Generation.Requirement;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Sequence;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Variable;
+import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm;
 import hk.ust.cse.Wala.Jar2IR;
 
 import java.util.Hashtable;
@@ -20,8 +21,11 @@ public class SimpleGenerator extends AbstractGenerator {
   @Override
   public Sequence generate(Requirement req, List<Requirement> ancestorReqs) {
     Sequence seq = null;
-    if (onlyVarNotNullReq(req)) {
-      String typeName = req.getRequirementTerm(0).getInstance1().getLastRefType();
+    if (onlyVarNotNullReq(req, "v9999")) {
+      BinaryConditionTerm binaryTerm = req.getCondition(0).getOnlyBinaryTerm();
+      String typeName = binaryTerm.getInstance1().getLastReference() != null ? 
+          binaryTerm.getInstance1().getLastRefType() : binaryTerm.getInstance2().getLastRefType(); // v1 != null or null != v1
+
       if (typeName.equals("Ljava/net/URL")) {
         seq = createURL();
       }
