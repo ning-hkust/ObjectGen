@@ -1,7 +1,9 @@
 package hk.ust.cse.ObjectGen.Generation;
 
 import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm;
-import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm.Comparator;
+import hk.ust.cse.Prevision.PathCondition.Condition;
+import hk.ust.cse.Prevision.PathCondition.ConditionTerm;
+import hk.ust.cse.Prevision.PathCondition.TypeConditionTerm;
 import hk.ust.cse.Prevision.VirtualMachine.Instance;
 import hk.ust.cse.util.Utils;
 
@@ -14,21 +16,21 @@ public class Requirement {
 
   public Requirement(String varName) {
     m_varName          = varName;
-    m_requirementTerms = new ArrayList<BinaryConditionTerm>();
+    m_conditions = new ArrayList<Condition>();
     m_compareStrings   = new HashSet<String>();
   }
   
-  public void addRequirementTerm(BinaryConditionTerm term) {
-    m_requirementTerms.add(term);
-    m_compareStrings.add(toCompareString(term));
+  public void addCondition(Condition condition) {
+    m_conditions.add(condition);
+    m_compareStrings.add(toCompareString(condition));
   }
   
-  public BinaryConditionTerm getRequirementTerm(int index) {
-    return m_requirementTerms.get(index);
+  public Condition getCondition(int index) {
+    return m_conditions.get(index);
   }
   
-  public List<BinaryConditionTerm> getRequirementTerms() {
-    return m_requirementTerms;
+  public List<Condition> getConditions() {
+    return m_conditions;
   }
   
   public HashSet<String> getCompareStrings() {
@@ -146,64 +148,90 @@ public class Requirement {
     return equal;
   }
   
+  private String toCompareString(Condition condition) {
+    StringBuilder compareStr = new StringBuilder();
+    
+    for (int i = 0, size = condition.getConditionTerms().size(); i < size; i++) {
+      ConditionTerm term = condition.getConditionTerms().get(i);
+      if (term instanceof BinaryConditionTerm) {
+        compareStr.append(toCompareString((BinaryConditionTerm) term));
+      }
+      else if (term instanceof TypeConditionTerm) {
+        compareStr.append(toCompareString((TypeConditionTerm) term));
+      }
+      if (i != size - 1) {
+        compareStr.append(" or ");
+      }
+    }
+
+    return compareStr.toString();
+  }
+  
+  private String toCompareString(TypeConditionTerm term) {
+    return toCompareString(term.getInstance1()) + " " + term.getComparator().toString() + " " + term.getTypeString();
+  }
+  
   private String toCompareString(BinaryConditionTerm term) {
     String compareStr = null;
     
     Instance instance1 = term.getInstance1();
-    compareStr = term.toString();
-    int index = compareStr.indexOf(term.getComparator().equals(Comparator.OP_EQUAL) ? " == " : " != ");
-    compareStr = toCompareString(instance1) + compareStr.substring(index);
+    Instance instance2 = term.getInstance2();
     
-    if (instance1.getRight() == null) { // not function interpretation
-      String value = term.getInstance2().getValue();
-      if (!Utils.isPrimitiveType(instance1.getLastRefType()) && 
-        term.getComparator().equals(Comparator.OP_INEQUAL) && value.equals("null")) {
-        String typeName = instance1.getLastRefType();
-        compareStr = compareStr.substring(0, compareStr.indexOf(" != ")) + " == " + typeName;
+    // convert ?? != null into ?? == typeName
+    if (term.isNotEqualToNull()) {
+      if (instance1.getRight() == null) { // not array access
+        compareStr = toCompareString(instance1) + " == " + instance1.getLastRefType();
       }
-    }
-    else { // array access
-      String value = term.getInstance2().getValue();
-      String typeName = instance1.getLeft().getLastRefType();
-      typeName = typeName.startsWith("[") ? typeName.substring(1) : typeName;
-      if (!Utils.isPrimitiveType(typeName) && 
-          term.getComparator().equals(Comparator.OP_INEQUAL) && value.equals("null")) {
+      else { // array access
+        String typeName = instance1.getLeft().getLastRefType();
+        typeName = typeName.startsWith("[") ? typeName.substring(1) : typeName;
         typeName = instance1.getType() != null ? instance1.getType() : typeName;
-        compareStr = compareStr.substring(0, compareStr.indexOf(" != ")) + " == " + typeName;
+        compareStr = toCompareString(instance1) + " == " + typeName;
       }
     }
+    else {
+      compareStr = toCompareString(instance1) + " " + term.getComparator().toString() + " " + toCompareString(instance2);
+    }
+    
     return compareStr;
   }
   
   private String toCompareString(Instance instance) {
-    String compareStr = instance.toString();
+    String compareStr = null;
     if (instance.getRight() == null) { // v1 or ??.field
       Instance topInstance = instance.getToppestInstance();
-      if (topInstance.getRight() != null) { // (?? @ #!).field
-        int index = compareStr.lastIndexOf(" @ ");
-        compareStr = "(" + toCompareString(topInstance.getLeft()) + compareStr.substring(index);
+      if (instance != topInstance) { // v1.field or (?? @ ??).field
+        compareStr = instance.toString();
+        int index = compareStr.indexOf('.', compareStr.lastIndexOf(')') + 1);
+        
+        if (index >= 0) {
+          compareStr = toCompareString(topInstance) + compareStr.substring(index);
+        }
+        else {
+          // in case there is a method call string in summary path condition
+          compareStr = toCompareString(topInstance) + compareStr.substring(topInstance.toString().length());
+        }
       }
-      else if (instance != topInstance) { // ??.field
-        int index = compareStr.lastIndexOf(".");
-        compareStr = toCompareString(topInstance) + compareStr.substring(index);
-      }
-      else { // v1
+      else if (!instance.isConstant() && instance.getLastReference() != null) { // v1
         compareStr = topInstance.getLastRefType();
       }
+      else {
+        compareStr = instance.toString();
+      }
     }
-    else { // (?? @ #!)
-      int index = compareStr.lastIndexOf(" @ ");
-      compareStr = "(" + toCompareString(instance.getLeft()) + compareStr.substring(index);
+    else { // (?? @ ??)
+      compareStr = "(" + toCompareString(instance.getLeft()) + " " + 
+          instance.getOp() + " " + toCompareString(instance.getRight()) + ")";
     }
 
     return compareStr;
   }
   
-  private boolean                         m_useInnerClass;
-  private Instance                        m_targetInstance;
-  private Class<?>                        m_targetType;
-  private String                          m_targetTypeDeclJavaName;
-  private final String                    m_varName;
-  private final List<BinaryConditionTerm> m_requirementTerms;
-  private final HashSet<String>           m_compareStrings;
+  private boolean               m_useInnerClass;
+  private Instance              m_targetInstance;
+  private Class<?>              m_targetType;
+  private String                m_targetTypeDeclJavaName;
+  private final String          m_varName;
+  private final List<Condition> m_conditions;
+  private final HashSet<String> m_compareStrings;
 }

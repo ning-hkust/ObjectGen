@@ -1,7 +1,6 @@
 package hk.ust.cse.ObjectGen.Summary;
 
 import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm;
-import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm.Comparator;
 import hk.ust.cse.Prevision.PathCondition.Condition;
 import hk.ust.cse.Prevision.PathCondition.ConditionTerm;
 import hk.ust.cse.Prevision.PathCondition.Formula;
@@ -1426,8 +1425,7 @@ public class Summary {
       ConditionTerm term = condition.getConditionTerms().get(0);
       if (term instanceof BinaryConditionTerm) {
         BinaryConditionTerm binaryTerm = (BinaryConditionTerm) term;
-        if (binaryTerm.getComparator() == Comparator.OP_INEQUAL && 
-            "null".equals(binaryTerm.getInstance2().getValue())) {
+        if (binaryTerm.isNotEqualToNull()) {
           Instance instance1 = binaryTerm.getInstance1();
           if (instance1.getValue() != null && instance1.getValue().startsWith("FreshInstanceOf")) {
             freshNotNullTerm = true;

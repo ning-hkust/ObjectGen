@@ -8,7 +8,7 @@ import hk.ust.cse.ObjectGen.Generation.TestCase.Sequence;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Statement;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Variable;
 import hk.ust.cse.Prevision.Misc.CallStack;
-import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm;
+import hk.ust.cse.Prevision.PathCondition.Condition;
 import hk.ust.cse.Wala.Jar2IR;
 import hk.ust.cse.Wala.WalaUtils;
 import hk.ust.cse.util.Utils;
@@ -36,15 +36,15 @@ import com.ibm.wala.ssa.IR;
 
 public class ModelTestGeneration {
   
-  public ModelTestGeneration(String appJar, String pseudoImplJarFile, String summaryDBPath, String modelDB, 
-      String outputDir, String filterModelsFile, String filterMethodsFile, int maxStep, int maxSubClasses, 
-      int accessibility, int[] findMoreValues, boolean allowStaticNotSat) throws Exception {
+  public ModelTestGeneration(String appJar, String pseudoImplJarFile, String javaSummaryDBPath, 
+      String otherSummaryDBPath, String modelDB, String outputDir, String filterModelsFile, String filterMethodsFile, 
+      int maxStep, int maxSubClasses, int accessibility, boolean allowStaticNotSat) throws Exception {
     
     Utils.loadJarFile(appJar);
     
     HashSet<String> filterMethods = readFilterMethods(filterMethodsFile);
-    m_generator = new Generator(appJar, pseudoImplJarFile, summaryDBPath, 
-        filterMethods, maxStep, maxSubClasses, accessibility, findMoreValues, allowStaticNotSat);
+    m_generator = new Generator(appJar, pseudoImplJarFile, javaSummaryDBPath, 
+        otherSummaryDBPath, filterMethods, maxStep, maxSubClasses, accessibility, allowStaticNotSat);
     m_junitFileWriter = new JunitFileWriter(outputDir);
     
     m_filterModelIDs = readFilterModelIDs(filterModelsFile);
@@ -273,16 +273,23 @@ public class ModelTestGeneration {
     // stop long run methods
     boolean timeout = genThread.isAlive();
     if (timeout) {
+      System.err.println("Sequence generation timeout! Tiggering stop flag...");
       genThread.setStopFlag();
       
       long setStopTime = System.currentTimeMillis();
-      while (genThread.isAlive() && (System.currentTimeMillis() - setStopTime) < 10000) {
+      while (genThread.isAlive() && (System.currentTimeMillis() - setStopTime) < 5000) {
         Thread.sleep(25); // wait for stop flag to take effect
       }
+
       if (genThread.isAlive()) {
+        System.err.println("Stop flag is not working, terminating generation thread...");
         genThread.stop();
+        Thread.sleep(1000);
+        System.err.println("Generation thread terminated!");
       }
-      System.err.println("Sequence generation timeout!");
+      else {
+        System.err.println("Generation thread stopped gracefully!");
+      }
     }
     
     return genThread.getLastGenResult();
@@ -293,20 +300,21 @@ public class ModelTestGeneration {
     
     Sequence sequence = null;
     
-    BinaryConditionTerm notNullTerm = null;
+    Condition notNullCond = null;
     Requirement origReq = origRequirements.getRequirement("v1");
-    for (BinaryConditionTerm reqTerm : origReq.getRequirementTerms()) {
-      if (reqTerm.toString().equals("v9999 != null")) {
-        notNullTerm = reqTerm;
+    for (Condition reqCond : origReq.getConditions()) {
+      if (reqCond.getOnlyBinaryTerm() != null && 
+          reqCond.getOnlyBinaryTerm().toString().equals("v9999 != null")) {
+        notNullCond = reqCond;
         break;
       }
     }
     
-    if (notNullTerm != null) {
+    if (notNullCond != null) {
       Requirement simpleCalleeReq = new Requirement("v1");
-      simpleCalleeReq.addRequirementTerm(notNullTerm);
+      simpleCalleeReq.addCondition(notNullCond);
       boolean useInnerClass = !ir.getMethod().isStatic() && !ir.getMethod().isPublic();
-      simpleCalleeReq.setTargetInstance(notNullTerm.getInstance1(), useInnerClass);
+      simpleCalleeReq.setTargetInstance(notNullCond.getOnlyBinaryTerm().getInstance1(), useInnerClass);
       Requirements requirements = new Requirements();
       requirements.addRequirement("v1", simpleCalleeReq);
       
@@ -845,8 +853,9 @@ public class ModelTestGeneration {
             Requirement req = requirements.getRequirement(key);
             if (req != null) {
               // skip primitives
-              if (removePrimitives && req.getRequirementTerms().size() == 1 && 
-                  req.getRequirementTerms().get(0).getInstance2().getValue().startsWith("#!")) {
+              if (removePrimitives && req.getConditions().size() == 1 && 
+                  req.getConditions().get(0).getOnlyBinaryTerm() != null && 
+                  req.getConditions().get(0).getOnlyBinaryTerm().getInstance2().getValue().startsWith("#!")) {
                 continue;
               }
               
@@ -955,25 +964,25 @@ public class ModelTestGeneration {
     ModelTestGeneration generation = new ModelTestGeneration(
         args[0],                   /* jar file */
         args[1],                   /* pseudo implementation jar */
-        args[2],                   /* summary dir */
-        args[3],                   /* model database name */
-        args[4],                   /* target test case dir */
-        args[5],                   /* filter model list file */
-        args[6],                   /* filter method list file */
-        Integer.parseInt(args[7]), /* max step */
+        args[2],                   /* java summary dir */
+        args[3],                   /* other summary dir */
+        args[4],                   /* model database name */
+        args[5],                   /* target test case dir */
+        args[6],                   /* filter model list file */
+        args[7],                   /* filter method list file */
+        Integer.parseInt(args[8]), /* max step */
         5,                         /* max sub-classes */
-        Integer.parseInt(args[8]), /* accessibility */
-        new int[] {Integer.parseInt(args[9]), Integer.parseInt(args[10])}, /* find more values */
+        Integer.parseInt(args[9]), /* accessibility */
         true);                     /* relax generation */
     
-    int startModelID = Integer.parseInt(args[11]);
-    if (args.length < 14) {
-      generation.genTestCase(startModelID, Integer.parseInt(args[12]) /* max generation time */, true);
+    int startModelID = Integer.parseInt(args[10]);
+    if (args.length < 13) {
+      generation.genTestCase(startModelID, Integer.parseInt(args[11]) /* max generation time */, true);
     }
     else {
-      int endModelID = Integer.parseInt(args[12]);
+      int endModelID = Integer.parseInt(args[11]);
       endModelID = endModelID < 0 ? Integer.MAX_VALUE : endModelID;
-      generation.genTestCases(startModelID, endModelID, Integer.parseInt(args[13]) /* max generation time */, true, true);
+      generation.genTestCases(startModelID, endModelID, Integer.parseInt(args[12]) /* max generation time */, true, true);
     }
     //generation.analysis("./progress.txt", true, true);
   }

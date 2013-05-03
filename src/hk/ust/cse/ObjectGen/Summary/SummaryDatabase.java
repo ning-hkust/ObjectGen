@@ -14,19 +14,20 @@ import java.util.List;
 
 public class SummaryDatabase {
 
-  public SummaryDatabase(String databasePath, int maxCache, WalaAnalyzer walaAnalyzer) {
-    m_maxCache       = maxCache;
-    m_databasePath   = databasePath;
-    m_walaAnalyzer   = walaAnalyzer;
-    m_usedSequence   = new ArrayList<String>();
-    m_summaryCache = new Hashtable<String, List<Summary>>();
+  public SummaryDatabase(String javaDatabasePath, String otherDatabasePath, int maxCache, WalaAnalyzer walaAnalyzer) {
+    m_maxCache          = maxCache;
+    m_javaDatabasePath  = javaDatabasePath;
+    m_otherDatabasePath = otherDatabasePath;
+    m_walaAnalyzer      = walaAnalyzer;
+    m_usedSequence      = new ArrayList<String>();
+    m_summaryCache      = new Hashtable<String, List<Summary>>();
   }
   
   public void saveSummariesOverride(String methodSig, List<Summary> summaries) {
     // create full directory name
     String methodName      = methodSig.substring(0, methodSig.indexOf('('));
     String slashMethodName = methodName.replace('.', '/').replace('<', '(').replace('>', ')');
-    String fullDirPath     = m_databasePath + "/" + slashMethodName + "_" + methodSig.hashCode();
+    String fullDirPath     = chooseDatabase(methodSig) + "/" + slashMethodName + "_" + methodSig.hashCode();
     
     // create directory
     File directory = new File(fullDirPath);
@@ -53,7 +54,7 @@ public class SummaryDatabase {
     // create full directory name
     String methodName      = methodSig.substring(0, methodSig.indexOf('('));
     String slashMethodName = methodName.replace('.', '/').replace('<', '(').replace('>', ')');
-    String fullDirPath     = m_databasePath + "/" + slashMethodName + "_" + methodSig.hashCode();
+    String fullDirPath     = chooseDatabase(methodSig) + "/" + slashMethodName + "_" + methodSig.hashCode();
 
     // create directory
     File directory = new File(fullDirPath);
@@ -82,7 +83,7 @@ public class SummaryDatabase {
     // create full directory name
     String methodName      = methodSig.substring(0, methodSig.indexOf('('));
     String slashMethodName = methodName.replace('.', '/').replace('<', '(').replace('>', ')');
-    String fullDirPath     = m_databasePath + "/" + slashMethodName + "_" + methodSig.hashCode();
+    String fullDirPath     = chooseDatabase(methodSig) + "/" + slashMethodName + "_" + methodSig.hashCode();
     
     // delete directory
     File directory = new File(fullDirPath);
@@ -100,7 +101,7 @@ public class SummaryDatabase {
       // create full directory name
       String methodName      = methodSig.substring(0, methodSig.indexOf('('));
       String slashMethodName = methodName.replace('.', '/').replace('<', '(').replace('>', ')');
-      String fullDirPath     = m_databasePath + "/" + slashMethodName + "_" + methodSig.hashCode();
+      String fullDirPath     = chooseDatabase(methodSig) + "/" + slashMethodName + "_" + methodSig.hashCode();
       
       // check folder
       File directory = new File(fullDirPath);
@@ -124,7 +125,7 @@ public class SummaryDatabase {
       // create full directory name
       String methodName      = methodSig.substring(0, methodSig.indexOf('('));
       String slashMethodName = methodName.replace('.', '/').replace('<', '(').replace('>', ')');
-      String fullDirPath     = m_databasePath + "/" + slashMethodName + "_" + methodSig.hashCode();
+      String fullDirPath     = chooseDatabase(methodSig) + "/" + slashMethodName + "_" + methodSig.hashCode();
       
       // check folder
       File directory = new File(fullDirPath);
@@ -184,8 +185,18 @@ public class SummaryDatabase {
     return readSummaries(methodSig);
   }
   
+  private String chooseDatabase(String methodSig) {
+    if (methodSig.startsWith("java.") || methodSig.startsWith("hk.")) {
+      return m_javaDatabasePath;
+    }
+    else {
+      return m_otherDatabasePath;
+    }
+  }
+  
   private final int                              m_maxCache;
-  private final String                           m_databasePath;
+  private final String                           m_javaDatabasePath;
+  private final String                           m_otherDatabasePath;
   private final WalaAnalyzer                     m_walaAnalyzer;
   private final List<String>                     m_usedSequence;
   private final Hashtable<String, List<Summary>> m_summaryCache;

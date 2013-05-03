@@ -30,7 +30,7 @@ public class IntraSummaryExtractor {
 
   public IntraSummaryExtractor(String appJar, String pseudoImplJar) throws Exception {
     m_executor = new ForwardExecutor(appJar, pseudoImplJar, new CompleteForwardHandler(), new SMTChecker(SOLVERS.Z3));
-    m_intraSummaryDatabase = new SummaryDatabase("./intra_summaries/", 20, m_executor.getWalaAnalyzer());
+    m_intraSummaryDatabase = new SummaryDatabase("./java_intra_summaries/", "./intra_summaries/", 20, m_executor.getWalaAnalyzer());
     
     // load jar file, _removed.jar version is for faster call graph construction. Since it may 
     // be missing some classes (e.g. UnknownElement), we should use the full version in classloader
@@ -39,7 +39,6 @@ public class IntraSummaryExtractor {
   }
   
   public List<Summary> extract(String methodSig, boolean saveSummaries, long maxExtractTime) {
-
     try {
       // obtain initial intra-summaries of the method
       // read stack frames
@@ -103,9 +102,9 @@ public class IntraSummaryExtractor {
     System.out.println(methodsToExtract.size() + " methods to extract intra-summaries...");
 
     // extract all methods
-    BufferedWriter writer0 = new BufferedWriter(new FileWriter("./intra_summaries/summary_progress.txt", false));
-    BufferedWriter writer1 = new BufferedWriter(new FileWriter("./intra_summaries/extracted_methods.txt", false));
-    BufferedWriter writer2 = new BufferedWriter(new FileWriter("./intra_summaries/faileded_methods.txt", false));
+    BufferedWriter writer0 = new BufferedWriter(new FileWriter("./summary_progress.txt", false));
+    BufferedWriter writer1 = new BufferedWriter(new FileWriter("./extracted_methods.txt", false));
+    BufferedWriter writer2 = new BufferedWriter(new FileWriter("./faileded_methods.txt", false));
     for (int i = 0, size = methodsToExtract.size(); i < size; i++) {
       String methodSig = methodsToExtract.get(i);
       
@@ -165,19 +164,15 @@ public class IntraSummaryExtractor {
     return m_intraSummaryDatabase;
   }
   
-  // extract intra-summary methods
+  // extract method intra-summaries
   public static void main(String args[]) throws Exception {
     if (args.length == 0) {
       //String appJar = "D:/Projects/BranchModelGenerator/targets/apache-commons-collections/target/commons-collections-3.2.1.jar";
-      //String appJar = "D:/Projects/BranchModelGenerator/targets/sat4j/target/org.sat4j.core-2.2.0.jar";
-      //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-log4j/targets/log4j-1.2.15_removed.jar";
-      //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-ant/targets/ant-all-1.7.0_removed.jar";
-      String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-commons-collections/targets/commons-collections-3.1.jar";
-      //String appJar = "D:/Projects/ObjectGen/hk.ust.cse.ObjectGen.jar";
+      String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-log4j/targets/log4j-1.2.15_removed.jar";
       String pseudoImplJar = "./lib/hk.ust.cse.Prevision_PseudoImpl.jar"; 
       IntraSummaryExtractor extractor = new IntraSummaryExtractor(appJar, pseudoImplJar);
 
-      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$AVLNode.insertOnRight(ILjava/lang/Object;)Lorg/apache/commons/collections/list/TreeList$AVLNode;");
+      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "java.lang.Boolean.getBoolean(Ljava/lang/String;)Z");
 
       String methodSig = ir.getMethod().getSignature();
       List<Summary> intraSummaries = extractor.extract(methodSig, true, 100000);

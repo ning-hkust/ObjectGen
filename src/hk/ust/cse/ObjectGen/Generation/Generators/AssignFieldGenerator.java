@@ -7,12 +7,14 @@ import hk.ust.cse.ObjectGen.Generation.TestCase.AssignmentStatement;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Sequence;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Variable;
 import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm;
+import hk.ust.cse.Prevision.PathCondition.Condition;
 import hk.ust.cse.Prevision.VirtualMachine.Instance;
 import hk.ust.cse.Prevision.VirtualMachine.Reference;
 import hk.ust.cse.util.Utils;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.List;
 
@@ -39,10 +41,14 @@ public class AssignFieldGenerator extends AbstractGenerator {
       
       String targetTypeName = null;
       Class<?> targetType   = null;
-      for (int i = 0, size = req.getRequirementTerms().size(); i < size && childReqs != null; i++) {
-        BinaryConditionTerm term = req.getRequirementTerms().get(i);
-        Instance instance1 = term.getInstance1();
-        Instance instance2 = term.getInstance2();
+      for (int i = 0, size = req.getConditions().size(); i < size && childReqs != null; i++) {
+        BinaryConditionTerm binaryTerm = req.getCondition(i).getOnlyBinaryTerm();
+        if (binaryTerm == null) {
+          continue;
+        }
+        
+        Instance instance1 = binaryTerm.getInstance1();
+        Instance instance2 = binaryTerm.getInstance2();
         if (!instance1.isBounded() && instance1.getLastReference().getDeclaringInstance() == null) { // v1 != null
           // currently, we don't support modifying non-static fields
         }
@@ -90,9 +96,9 @@ public class AssignFieldGenerator extends AbstractGenerator {
               
               // fieldInstance has been changed to instance
               if (instance1 == fieldInstance) {
-                term = new BinaryConditionTerm(instance, term.getComparator(), instance2);
+                binaryTerm = new BinaryConditionTerm(instance, binaryTerm.getComparator(), instance2);
               }
-              childReq.addRequirementTerm(term);
+              childReq.addCondition(new Condition(binaryTerm));
             }
             else {
               // currently, we only support modifying public non-final field
@@ -148,5 +154,56 @@ public class AssignFieldGenerator extends AbstractGenerator {
     }
 
     return genSequence;
+  }
+  
+  public boolean allFieldsAccessible(Requirement req) {
+    boolean allAccessible = true;
+    
+    HashSet<String> checked = new HashSet<String>();
+    Class<?> targetType = Utils.findClass(req.getTargetInstance().getLastRefType());
+    for (int i = 0, size = req.getConditions().size(); i < size && allAccessible; i++) {
+      if (req.getCondition(i).getConditionTerms().size() > 1) {
+        allAccessible = false;
+        continue;
+      }
+      
+      BinaryConditionTerm binaryTerm = req.getCondition(i).getOnlyBinaryTerm();
+      if (binaryTerm == null || (binaryTerm.getInstance1().isConstant() && 
+                                 binaryTerm.getInstance2().isConstant())) {
+        continue;
+      }
+      
+      Instance assignTo = binaryTerm.getInstance1();
+      assignTo = assignTo.isConstant() ? binaryTerm.getInstance2() : assignTo;
+      if (assignTo.isBounded() && assignTo.getRight() != null) { // (v9999.appenderList.elementData @ #!0)
+        assignTo = assignTo.getLeft();
+      }
+      
+      // v9999 != null, skip
+      if (!assignTo.hasDeclaringInstance()) {
+        continue;
+      }
+      
+      // find the first level field
+      Instance fieldInstance   = null;
+      Instance currentInstance = assignTo;
+      while (currentInstance.getLastReference().getDeclaringInstance() != null) {
+        fieldInstance   = currentInstance;
+        currentInstance = currentInstance.getLastReference().getDeclaringInstance();
+        if (currentInstance.isBounded() && currentInstance.getRight() != null) { // (v9999.appenderList.elementData @ #!0)
+          currentInstance = currentInstance.getLeft();
+        }
+      }
+      
+      // check field
+      String fieldName = fieldInstance.getLastRefName();
+      if (!checked.contains(fieldName)) {
+        Field field = Utils.findClassField(targetType, fieldName);
+        allAccessible &= field != null && ((m_accessibility == 0 && Modifier.isPublic(field.getModifiers())) || 
+                                           (m_accessibility == 1 && !Modifier.isPrivate(field.getModifiers())));
+      }
+    }
+    
+    return allAccessible;
   }
 }

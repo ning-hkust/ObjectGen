@@ -2,15 +2,18 @@ package hk.ust.cse.ObjectGen.Generation;
 
 import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm;
 import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm.Comparator;
+import hk.ust.cse.Prevision.PathCondition.Condition;
 import hk.ust.cse.Prevision.VirtualMachine.Instance;
 import hk.ust.cse.Prevision.VirtualMachine.Instance.INSTANCE_OP;
 import hk.ust.cse.Prevision.VirtualMachine.Reference;
+import hk.ust.cse.Prevision.VirtualMachine.Relation;
 import hk.ust.cse.Wala.WalaAnalyzer;
 import hk.ust.cse.Wala.WalaUtils;
 import hk.ust.cse.util.Utils;
 
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -52,6 +55,18 @@ public class Requirements {
     return m_ensureGenOrder;
   }
   
+  public String toString() {
+    StringBuilder str = new StringBuilder();
+    
+    Enumeration<String> keys = m_reqsMap.keys();
+    while (keys.hasMoreElements()) {
+      String varName = (String) keys.nextElement();
+      Requirement childReq = m_reqsMap.get(varName);
+      str.append(varName + ": " + childReq.getConditions()).append("\n");
+    }
+    return str.toString();
+  }
+  
   public static Requirements createRequirements(String modelStr, IR ir, WalaAnalyzer walaAnalyzer) {
     Requirements requirements = new Requirements();
     
@@ -85,7 +100,7 @@ public class Requirements {
         BinaryConditionTerm term = parseFieldModelTerm(walaAnalyzer, modelLines[i], ir, 
             nameTypeMap, modelInstanceMap, nameInstanceMap, instanceModelMap);
         if (term != null) {
-          addToRequirements(requirements, term, topNameInstanceMap);
+          addToRequirements(requirements, new Condition(term), topNameInstanceMap);
         }
       }
     }
@@ -95,7 +110,7 @@ public class Requirements {
             nameInstanceMap, instanceNameMap, modelInstanceMap, instanceModelMap);
         if (terms != null && terms.size() > 0) {
           for (BinaryConditionTerm term : terms) {
-            addToRequirements(requirements, term, topNameInstanceMap);
+            addToRequirements(requirements, new Condition(term), topNameInstanceMap);
           }
         }
       }
@@ -130,7 +145,7 @@ public class Requirements {
                                  parent.getType().equals("Ljava/util/ArrayList") || 
                                  parent.getType().equals("Ljava/util/Vector"))) {
             if (right.getValue().startsWith("#!")) {
-              right = new Instance("#!10", "I", null);
+              right = new Instance("#!" + right.getValueWithoutPrefix() + "|#!10", "I", null);
               ret = new BinaryConditionTerm(left, binaryTerm.getComparator(), right);
             }
           }
@@ -140,7 +155,7 @@ public class Requirements {
                                       arrayElem.getType().equals("Ljava/util/ArrayList") || 
                                       arrayElem.getType().equals("Ljava/util/Vector")))  {
               if (right.getValue().startsWith("#!")) {
-                right = new Instance("#!10", "I", null);
+                right = new Instance("#!" + right.getValueWithoutPrefix() + "|#!10", "I", null);
                 ret = new BinaryConditionTerm(left, binaryTerm.getComparator(), right);
               }
             }
@@ -464,15 +479,16 @@ public class Requirements {
     return terms;
   }
 
-  private static void addToRequirements(Requirements requirements, BinaryConditionTerm term, 
+  private static void addToRequirements(Requirements requirements, Condition condition, 
       Hashtable<String, Instance> topNameInstanceMap) {
     
     // get varName (topInstance's name is already v9999, we want the actual v1/v2, etc)
     String varName = null;
-    Instance topInstance = term.getInstance1().getToppestInstance();
-    while (topInstance.getRight() != null) { // array access: (v9999 @ 1) != null
-      topInstance = topInstance.getLeft().getToppestInstance();
-    }
+    
+    HashSet<Instance> topInstances = condition.getRelatedTopInstances(new Hashtable<String, Relation>());
+    Instance topInstance = topInstances.iterator().next(); // should have exactly one
+    
+    // match variable name
     Enumeration<String> keys = topNameInstanceMap.keys();
     while (keys.hasMoreElements() && varName == null) {
       String key = (String) keys.nextElement();
@@ -485,7 +501,7 @@ public class Requirements {
       req = new Requirement(varName);
       requirements.addRequirement(varName, req);
     }
-    req.addRequirementTerm(term);
+    req.addCondition(condition);
   }
   
   // v1 instanceOf(Lorg/apache/tools/ant/util/DOMElementWriter) == #!1

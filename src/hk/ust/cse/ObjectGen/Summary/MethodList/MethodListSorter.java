@@ -25,17 +25,17 @@ import java.util.List;
 public class MethodListSorter {
 
   public MethodListSorter(String appJar, String pseudoImplJar) throws Exception {
-    m_forwardExecutor = new ForwardExecutor(appJar, pseudoImplJar, new CompleteForwardHandler(), new SMTChecker(SOLVERS.Z3));
-    m_intraSummaryDatabase = new SummaryDatabase("./intra_summaries/", 20, m_forwardExecutor.getWalaAnalyzer());
+    m_forwardExecutor      = new ForwardExecutor(appJar, pseudoImplJar, new CompleteForwardHandler(), new SMTChecker(SOLVERS.Z3));
+    m_intraSummaryDatabase = new SummaryDatabase("./java_intra_summaries/", "./intra_summaries/", 20, m_forwardExecutor.getWalaAnalyzer());
   }
   
   // a up-front all_methods.txt and intra-summaries should have already been prepared
-  public void produceAllMethodSortedList() {
+  public void produceAllMethodSortedList(String allMethodsFile, String allMethodsSortedFile) {
     // read all methods
     List<String> allMethodsList   = new ArrayList<String>();
     HashSet<String> allMethodsSet = new HashSet<String>();
     try {
-      BufferedReader reader = new BufferedReader(new FileReader("./summaries/all_methods.txt"));
+      BufferedReader reader = new BufferedReader(new FileReader(allMethodsFile));
       String line1 = null;
       while ((line1 = reader.readLine()) != null) {
         allMethodsList.add(line1);
@@ -47,7 +47,7 @@ public class MethodListSorter {
     // sort and write all sorted methods
     List<String> sortedList = sort(allMethodsList, allMethodsSet);
     try {
-      BufferedWriter writer = new BufferedWriter(new FileWriter("./summaries/all_methods_sorted.txt"));
+      BufferedWriter writer = new BufferedWriter(new FileWriter(allMethodsSortedFile));
       for (String methodSig : sortedList) {
         writer.append(methodSig).append("\n");
       }
@@ -161,15 +161,8 @@ public class MethodListSorter {
   }
   
   public static void main(String[] args) throws Exception {
-    MethodListSorter sorter = new MethodListSorter(
-        //"../../BranchModelGenerator/targets/apache-commons-collections/target/commons-collections-3.2.1.jar", 
-        //"../../BranchModelGenerator/targets/apache-commons-math/target/commons-math-2.1.jar", 
-        //"../../BranchModelGenerator/targets/JSAP/target/JSAP-2.1.jar", 
-        "../../BranchModelGenerator/targets/sat4j/target/org.sat4j.core-2.2.0.jar", 
-        //"../../STAR/experiments/ObjectGen/apache-log4j/targets/log4j-1.2.16.jar", 
-        //"../../STAR/experiments/ObjectGen/apache-ant/targets/ant-all-1.7.0.jar", 
-        "./lib/hk.ust.cse.Prevision_PseudoImpl.jar");
-    sorter.produceAllMethodSortedList();
+    MethodListSorter sorter = new MethodListSorter(args[0] /* jar file */, args[1] /* pseudoImplJar */);
+    sorter.produceAllMethodSortedList(args[2] /* all methods file */, args[3] /* output sorted method file */);
   }
   
   private final ForwardExecutor m_forwardExecutor;

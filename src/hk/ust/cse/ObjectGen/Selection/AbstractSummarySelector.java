@@ -5,6 +5,7 @@ import hk.ust.cse.ObjectGen.Generation.Generators.ParamReqDeductor.DeductResult;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Sequence;
 import hk.ust.cse.ObjectGen.Summary.Summary;
 import hk.ust.cse.Prevision.VirtualMachine.Reference;
+import hk.ust.cse.util.Utils;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -41,10 +42,19 @@ public abstract class AbstractSummarySelector {
       params.add(staticFieldClass);
     }
     else {
+      String reqTypeName = req.getTargetInstance().getLastRefType();
       for (int i = 1, size = ir.getNumberOfParameters(); i <= size; i++) {
-        params.add("v" + i);
+        String typeName = ir.getParameterType(i - 1).getName().toString();
+        if (Utils.canCastTo(reqTypeName, typeName) || Utils.canCastTo(typeName, reqTypeName)) {
+          params.add("v" + i);
+        }
       }
-      params.add("RET");
+      
+      String retTypeName = ir.getMethod().getReturnType().getName().toString();
+      if (!retTypeName.equals("V") && (Utils.canCastTo(reqTypeName, retTypeName) || 
+                                       Utils.canCastTo(retTypeName, reqTypeName))) {
+        params.add("RET");
+      }
     }
 
     for (int i = 0, size = params.size(); i < size && !useful; i++) {

@@ -33,17 +33,16 @@ import com.ibm.wala.ssa.IR;
 
 public class ObjectGenerator extends AbstractGenerator {
 
-  public ObjectGenerator(Generator allTypeGenerator, int accessibility, int maxStep, int[] findMoreValues, 
-      String pseudoImplJarFile, String summaryDBPath, HashSet<String> filterMethods) {
+  public ObjectGenerator(Generator allTypeGenerator, int accessibility, int maxStep, 
+      String pseudoImplJarFile, String javaSummaryDBPath, String otherSummaryDBPath, HashSet<String> filterMethods) {
     super(allTypeGenerator, accessibility);
 
     m_maxStep         = maxStep;
-    m_findMoreValues  = findMoreValues;
     m_filterMethods   = filterMethods;
     m_smtChecker      = new SMTChecker(SOLVERS.Z3);
     //m_selector      = new SimpleMethodSelector(m_maxSelect);
     m_selector        = new FieldMethodSelector(m_walaAnalyzer, pseudoImplJarFile != null, accessibility);
-    m_summaryDatabase = new SummaryDatabase(summaryDBPath, 20, m_walaAnalyzer);
+    m_summaryDatabase = new SummaryDatabase(javaSummaryDBPath, otherSummaryDBPath, 20, m_walaAnalyzer);
   }
 
   @Override
@@ -80,7 +79,7 @@ public class ObjectGenerator extends AbstractGenerator {
       
       // if we only need to satisfy v1 != null or we are at the maxStep step, 
       // only allow constructor or factoryOrCreateInners methods
-      boolean onlyVarNotNullReq = onlyVarNotNullReq(req);
+      boolean onlyVarNotNullReq = onlyVarNotNullReq(req, "v9999");
       if (onlyVarNotNullReq || ancestorReqs.size() == m_maxStep) {
         // get constructor methods
         potentialMethods.addAll(findInitMethods(req));
@@ -160,6 +159,7 @@ public class ObjectGenerator extends AbstractGenerator {
             new SimpleSummarySelector(methodSummaries, req, ir, this); 
         System.out.println("Original Summary Count: " + methodSummaries.size() + 
             ". Refined Summary Count: " + summarySelector.getSummaryCount());
+
         
         int summaryIndex               = 0;
         Requirements prevChildReqs     = null;
@@ -180,17 +180,23 @@ public class ObjectGenerator extends AbstractGenerator {
           Hashtable<Long, String> prevHashCodeVarMap = 
               (Hashtable<Long, String>) m_allTypeGenerator.getHashCodeVarMap().clone();
           
+          if (m_allTypeGenerator.getStopFlag()) {
+            continue;
+          }
+          
           try {
             DeductResult deductResult = summarySelector.getDeductResult(summary);
-            deductResult = deductResult == null ? deductor.deductChildReqs(summary, req) : deductResult;
-            if (deductResult == null) {
+            deductResult = deductResult == null ? deductor.deductChildReqs(summary.deepClone(), req) : deductResult;
+            if (deductResult == null || m_allTypeGenerator.getStopFlag()) {
               continue; // try next summary
             }
             targetAssignFrom = deductResult.keyVariable;
             targetFromRet    = deductResult.returnValIsKey;
             
             printStepSpaces(ancestorReqs.size());
-            System.out.println(" the " + summaryIndex + "th summary can be further deducted...");
+            System.out.println(" the " + summaryIndex + 
+                "th summary can be further deducted when parameter object state satisfies: ");
+            System.out.println(deductResult.toString());
             
             // ensure generating order if possible
             List<String> ensureOrder = Utils.enumerateToList(deductResult.childReqs.keys());
@@ -201,13 +207,19 @@ public class ObjectGenerator extends AbstractGenerator {
             genResult = m_allTypeGenerator.gen4ChildReqs(deductResult.childReqs, ancestorReqs);
             
             // inform selector about generation results
+            printStepSpaces(ancestorReqs.size());
+            System.out.print(genResult.getGenOrder().size() > 0 ? " parameters generated: " : "");
             for (String varName : genResult.getGenOrder()) {
               Sequence seq = genResult.getSequence(varName);
               summarySelector.informChildReqSat(deductResult.childReqs.getRequirement(varName), seq);
+              System.out.print(varName + " ");
             }
+            System.out.print(genResult.getNotSatVarNames().size() > 0 ? "| parameters not generated: " : "");
             for (String varName : genResult.getNotSatVarNames()) {
               summarySelector.informChildReqNotSat(deductResult.childReqs.getRequirement(varName));
+              System.out.print(varName + " ");
             }
+            System.out.println();
             prevChildReqs = deductResult.childReqs;
             prevGenResult = genResult;
             
@@ -463,12 +475,7 @@ public class ObjectGenerator extends AbstractGenerator {
     return m_smtChecker;
   }
   
-  public int[] getFindMoreValues() {
-    return m_findMoreValues;
-  }
-  
   private final int                    m_maxStep;
-  private final int[]                  m_findMoreValues;
   private final HashSet<String>        m_filterMethods;
   private final SMTChecker             m_smtChecker;
   private final AbstractMethodSelector m_selector;
