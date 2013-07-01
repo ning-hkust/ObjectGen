@@ -34,8 +34,9 @@ public class Sequence {
   }
   
   public void addMethod(IR ir, Hashtable<String, Variable> parameters, boolean useInnerClass) {
+    boolean keyVarIsParam  = false;
+    boolean keyVarIsStatic = m_keyVariable != null && m_keyVariable.getVarName().startsWith("L");
     List<Variable> allParams = new ArrayList<Variable>();
-    boolean keyVarIsParam = false;
     for (int i = 1; i <= ir.getNumberOfParameters(); i++) {
       String varName = "v" + i;
       Variable param = parameters.get(varName);
@@ -43,7 +44,7 @@ public class Sequence {
       keyVarIsParam |= param == m_keyVariable;
     }
     InvocationStatement statement = new InvocationStatement(
-        ir, allParams, keyVarIsParam ? null : m_keyVariable, useInnerClass);
+        ir, allParams, (keyVarIsParam || keyVarIsStatic) ? null : m_keyVariable, useInnerClass);
     m_statements.add(statement);
   }
   

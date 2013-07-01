@@ -1,6 +1,7 @@
 package hk.ust.cse.ObjectGen.Generation.Generators;
 
 import hk.ust.cse.ObjectGen.Generation.Generator;
+import hk.ust.cse.ObjectGen.Generation.HashCodeMap;
 import hk.ust.cse.ObjectGen.Generation.Requirement;
 import hk.ust.cse.ObjectGen.Generation.Requirements;
 import hk.ust.cse.ObjectGen.Generation.Generators.ParamReqDeductor.DeductResult;
@@ -46,7 +47,6 @@ public class ObjectGenerator extends AbstractGenerator {
   }
 
   @Override
-  @SuppressWarnings("unchecked")
   public Sequence generate(Requirement req, List<Requirement> ancestorReqs) {
     Variable targetAssignFrom  = null;
     IR selectedIR              = null;
@@ -177,8 +177,7 @@ public class ObjectGenerator extends AbstractGenerator {
           }
           Summary summary = summarySelector.nextSummary(prevSatReqs);
           
-          Hashtable<Long, String> prevHashCodeVarMap = 
-              (Hashtable<Long, String>) m_allTypeGenerator.getHashCodeVarMap().clone();
+          HashCodeMap prevHashCodeVarMap = m_allTypeGenerator.getHashCodeVarMap().clone();
           
           if (m_allTypeGenerator.getStopFlag()) {
             continue;

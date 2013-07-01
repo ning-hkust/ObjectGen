@@ -1,6 +1,7 @@
 package hk.ust.cse.ObjectGen.Generation.Generators;
 
 import hk.ust.cse.ObjectGen.Generation.Generator;
+import hk.ust.cse.ObjectGen.Generation.HashCodeMap;
 import hk.ust.cse.ObjectGen.Generation.Requirement;
 import hk.ust.cse.ObjectGen.Generation.Requirements;
 import hk.ust.cse.ObjectGen.Generation.TestCase.AssignmentStatement;
@@ -23,7 +24,6 @@ public class ArrayGenerator extends AbstractGenerator {
   }
 
   @Override
-  @SuppressWarnings("unchecked")
   public Sequence generate(Requirement req, List<Requirement> ancestorReqs) {
 
     // check if the current requirement can be set directly
@@ -148,8 +148,7 @@ public class ArrayGenerator extends AbstractGenerator {
             (m_accessibility == 1) && !Modifier.isPrivate(arrayTypeClass.getModifiers() /* component modifier */)) { 
 
           // generate recursively for the child requirements
-          Hashtable<Long, String> prevHashCodeVarMap = 
-              (Hashtable<Long, String>) m_allTypeGenerator.getHashCodeVarMap().clone();
+          HashCodeMap prevHashCodeVarMap = m_allTypeGenerator.getHashCodeVarMap().clone();
           GenerationResult genResult = m_allTypeGenerator.gen4ChildReqs(childRequirements, ancestorReqs);
           
           if (!genResult.hasNotSat()) {

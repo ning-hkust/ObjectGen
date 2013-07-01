@@ -662,16 +662,13 @@ public class Summary {
       if (!isAssignedEarlier(toRef, fromRef, toRef.getInstance(), fieldInstance, invokeTime)) {
         Instance translated = translateScope(fieldInstance, 
             paramArgMap, translatedMap, mergedInstances, replaceMap, invokeTime);
-        
-        // field Reference in instanceTo may have been changed, get the current one
-        toRef = instanceTo.getField(toRef.getName());
-        toRef.getOldInstances().add(translated);
-        setInstanceLifeTime(toRef, fromRef, translated, fieldInstance, invokeTime);
-        
         if (fieldInstance != translated) {
           replaceMap.put(fieldInstance, translated); // oldInstance could exist in path condition list
         }
-
+        
+        // field Reference in instanceTo may have been changed, get the current one
+        toRef = instanceTo.getField(toRef.getName());
+        
         // XXX may not always correct?
         if (!toRef.getOldInstances().contains(translated)) {
           List<Instance> oldInstances = new ArrayList<Instance>(toRef.getOldInstances());
@@ -683,6 +680,8 @@ public class Summary {
               setInstanceOrigin(oldInstance, translated, fromRef, fieldInstance, replaceMap, invokeTime);
             }
           }
+          toRef.getOldInstances().add(translated);
+          setInstanceLifeTime(toRef, fromRef, translated, fieldInstance, invokeTime);
         }
       }
       else {
@@ -707,9 +706,6 @@ public class Summary {
         // field Reference in instanceTo may have been changed, get the current one
         toRef = instanceTo.getField(toRef.getName());
         
-        toRef.getOldInstances().add(translatedOld);
-        setInstanceLifeTime(toRef, fromRef, translatedOld, oldInstance, invokeTime);
-        
         // XXX may not always correct?
         if (oldInstance.getLastReference() == fromRef) { // toRef's read becomes fromRef's latest before set
           if (!toRef.getOldInstances().contains(translatedOld)) {
@@ -732,6 +728,9 @@ public class Summary {
             else { // no override set
               translatedOld.setLastReference(toRef);
             }
+            
+            toRef.getOldInstances().add(translatedOld);
+            setInstanceLifeTime(toRef, fromRef, translatedOld, oldInstance, invokeTime);
           }
         }
         else { // fromRef's earliest after read becomes toRef's set
@@ -742,6 +741,9 @@ public class Summary {
                 setInstanceOrigin(oldInstance2, translatedOld, fromRef, oldInstance, replaceMap, invokeTime);
               }
             }
+
+            toRef.getOldInstances().add(translatedOld);
+            setInstanceLifeTime(toRef, fromRef, translatedOld, oldInstance, invokeTime);
           }
         }
         

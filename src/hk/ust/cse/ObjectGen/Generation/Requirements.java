@@ -71,6 +71,11 @@ public class Requirements {
     Requirements requirements = new Requirements();
     
     String[] modelLines = modelStr.split("\n");
+    for (int i = 0; i < modelLines.length; i++) {
+      if (modelLines[i].endsWith("\r")) {
+        modelLines[i] = modelLines[i].substring(0, modelLines[i].length() - 1);
+      }
+    }
     
     // retrieve explicit type information first
     Hashtable<String, String> nameTypeMap = new Hashtable<String, String>();
@@ -90,13 +95,15 @@ public class Requirements {
     Hashtable<Instance, String> instanceModelMap   = new Hashtable<Instance, String>();
     Hashtable<String, List<Instance>> modelInstanceMap = new Hashtable<String, List<Instance>>();
     for (int i = 1; i < modelLines.length; i++) {
-      if (!modelLines[i].startsWith("(") && !modelLines[i].contains(" instanceOf(")) { // non-array model term
+      if (!modelLines[i].startsWith("(") && !modelLines[i].contains(" instanceOf(") && 
+                                            !modelLines[i].contains(" instanceof ")) { // non-array model term
         parseFieldAccess(modelLines[i], ir, 
             modelInstanceMap, nameInstanceMap, instanceNameMap, instanceModelMap, topNameInstanceMap);
       }
     }
     for (int i = 1; i < modelLines.length; i++) {
-      if (!modelLines[i].startsWith("(") && !modelLines[i].contains(" instanceOf(")) { // non-array model term
+      if (!modelLines[i].startsWith("(") && !modelLines[i].contains(" instanceOf(") && 
+                                            !modelLines[i].contains(" instanceof ")) { // non-array model term
         BinaryConditionTerm term = parseFieldModelTerm(walaAnalyzer, modelLines[i], ir, 
             nameTypeMap, modelInstanceMap, nameInstanceMap, instanceModelMap);
         if (term != null) {
@@ -105,7 +112,8 @@ public class Requirements {
       }
     }
     for (int i = 1; i < modelLines.length; i++) {
-      if (modelLines[i].startsWith("(") && !modelLines[i].contains(" instanceOf(")) { // array model term
+      if (modelLines[i].startsWith("(") && !modelLines[i].contains(" instanceOf(") && 
+                                           !modelLines[i].contains(" instanceof ")) { // array model term
         List<BinaryConditionTerm> terms = parseArrayModelTerm(modelLines[i], nameTypeMap, 
             nameInstanceMap, instanceNameMap, modelInstanceMap, instanceModelMap);
         if (terms != null && terms.size() > 0) {
@@ -122,6 +130,9 @@ public class Requirements {
       String key = (String) keys.nextElement();
       Requirement req = requirements.getRequirement(key);
       
+      // force to use the smallest size value
+      listSizeRangeHack(req.getConditions());
+      
       boolean useInnerClass = !ir.getMethod().isStatic() && key.equals("v1") && !ir.getMethod().isPublic();
       req.setTargetInstance(topNameInstanceMap.get(key), useInnerClass);
     }
@@ -129,14 +140,15 @@ public class Requirements {
     return requirements;
   }
   
+  // v1.elementData.length == #!?
   public static BinaryConditionTerm elementDataLengthHack(BinaryConditionTerm binaryTerm) {
     BinaryConditionTerm ret = binaryTerm;
     
     Instance left  = binaryTerm.getInstance1();
     Instance right = binaryTerm.getInstance2();
-    if (binaryTerm.getComparator() == Comparator.OP_EQUAL && right.isConstant()) {
+    if (binaryTerm.getComparator() == Comparator.OP_EQUAL && right.isNumberConstant()) {
       Reference ref = left.getLastReference();
-      if (ref != null && ref.getName().equals("length") && right.getValue().startsWith("#!")) {
+      if (ref != null && ref.getName().equals("length")) {
         String str = left.toString();
         if (str.endsWith(".elementData.length")) {
           Reference parent = ref.getDeclaringInstance().getLastReference()
@@ -144,20 +156,17 @@ public class Requirements {
           if (parent != null && (parent.getType().equals("Ljava/util/List") || 
                                  parent.getType().equals("Ljava/util/ArrayList") || 
                                  parent.getType().equals("Ljava/util/Vector"))) {
-            if (right.getValue().startsWith("#!")) {
-              right = new Instance("#!" + right.getValueWithoutPrefix() + "|#!10", "I", null);
-              ret = new BinaryConditionTerm(left, binaryTerm.getComparator(), right);
-            }
+
+            right = new Instance("#!" + right.getValueWithoutPrefix() + "|#!10", "I", null);
+            ret = new BinaryConditionTerm(left, binaryTerm.getComparator(), right);
           }
           else if (parent == null) { // (v9999.allResults.__table__ @ #!0).elementData.length
             Instance arrayElem = ref.getDeclaringInstance().getLastReference().getDeclaringInstance(); 
             if (arrayElem != null && (arrayElem.getType().equals("Ljava/util/List") || 
                                       arrayElem.getType().equals("Ljava/util/ArrayList") || 
                                       arrayElem.getType().equals("Ljava/util/Vector")))  {
-              if (right.getValue().startsWith("#!")) {
-                right = new Instance("#!" + right.getValueWithoutPrefix() + "|#!10", "I", null);
-                ret = new BinaryConditionTerm(left, binaryTerm.getComparator(), right);
-              }
+              right = new Instance("#!" + right.getValueWithoutPrefix() + "|#!10", "I", null);
+              ret = new BinaryConditionTerm(left, binaryTerm.getComparator(), right);
             }
           }
         }
@@ -166,11 +175,82 @@ public class Requirements {
     return ret;
   }
   
+  // v1.size/v1.elementCount >/>= #!?, immediately choose the smallest value. 
+  // This is useful because it avoids unnecessary add methods
+  public static void listSizeRangeHack(List<Condition> conditions) {
+    
+    Hashtable<Instance, Long> currentSmallest = new Hashtable<Instance, Long>();
+    HashSet<Instance> foundInArthm = new HashSet<Instance>();
+    
+    for (int i = 0, size = conditions.size(); i < size; i++) {
+      BinaryConditionTerm binaryTerm = conditions.get(i).getOnlyBinaryTerm();
+      if (binaryTerm != null) {
+        Instance left    = binaryTerm.getInstance1().isConstant() ? binaryTerm.getInstance2() : binaryTerm.getInstance1();
+        Instance right   = binaryTerm.getInstance1().isConstant() ? binaryTerm.getInstance1() : binaryTerm.getInstance2();
+        Comparator comp = binaryTerm.getInstance1().isConstant() ? binaryTerm.getComparator().getReverse() : binaryTerm.getComparator();
+        
+        if ((comp == Comparator.OP_GREATER || comp == Comparator.OP_GREATER_EQUAL || comp == Comparator.OP_EQUAL) && 
+          right.isNumberConstant() && sizeOrElemCountField(left)) {
+          long value = Long.parseLong(right.getValueWithoutPrefix());
+          value = comp == Comparator.OP_GREATER ? value + 1 : value;
+          
+          Long prevValue = currentSmallest.get(left);
+          if (prevValue == null || prevValue < value) {
+            currentSmallest.put(left, value);
+          }
+        }
+        
+        // if it is an arithmetic instance, all instances in it are not included
+        if (left.isBounded()) {
+          HashSet<Instance> instances = left.getRelatedInstances(null, false, false, false, false);
+          for (Instance instance : instances) {
+            if (sizeOrElemCountField(instance)) {
+              foundInArthm.add(instance);
+            }
+          }
+        }
+      }
+    }
+    
+    Enumeration<Instance> keys = currentSmallest.keys();
+    while (keys.hasMoreElements()) {
+      Instance left = (Instance) keys.nextElement();
+      if (!foundInArthm.contains(left)) {
+        Instance smallest = new Instance("#!" + currentSmallest.get(left), "I", null);
+        BinaryConditionTerm newTerm = new BinaryConditionTerm(left, Comparator.OP_EQUAL, smallest);
+        conditions.add(new Condition(newTerm));
+      }
+    }
+  }
+  
+  private static boolean sizeOrElemCountField(Instance instance) {
+    boolean ret = false;
+    
+    Reference ref = instance.getLastReference();
+    if (ref != null && (ref.getName().equals("size") || ref.getName().equals("elementCount"))) {
+      Reference parent = ref.getDeclaringInstance().getLastReference();
+      if (parent != null && (parent.getType().equals("Ljava/util/List") || 
+                             parent.getType().equals("Ljava/util/ArrayList") || 
+                             parent.getType().equals("Ljava/util/Vector"))) {
+        ret = true;
+      }
+      else if (parent == null) { // (v9999.allResults.__table__ @ #!0).size
+        Instance arrayElem = ref.getDeclaringInstance();
+        if (arrayElem != null && (arrayElem.getType().equals("Ljava/util/List") || 
+                                  arrayElem.getType().equals("Ljava/util/ArrayList") || 
+                                  arrayElem.getType().equals("Ljava/util/Vector")))  {
+          ret = true;
+        }
+      }
+    }
+    return ret;
+  }
+    
   private static final Pattern s_pattern1 = Pattern.compile(
-      "^(v[0-9]+(?:(?:\\[[\\#\\!]*[0-9]+\\])*\\.[\\w_\\$]+(?:\\[[\\#\\!]*[0-9]+\\])*)*) == " +
+      "^(v[0-9]+(?:(?:\\[[\\#\\!]*[0-9]+\\])*\\.[\\w_\\$]+(?:\\[[\\#\\!]*[0-9]+\\])*)*) ([=><!]+) " +
       "((?:(?:[\\#\\!]*[\\-0-9]+[\\|]*)+)|(?:(?:\\#\\#[\\S]*)+))$"); // v1/v1.value/v1.value.next/v1.value[#!1] == #!21474836471/v1.str == ##str
   private static final Pattern s_pattern2 = Pattern.compile(
-      "^(L[\\w_\\$/]+(?:\\.[\\w_\\$]+(?:\\[[\\#\\!]*[0-9]+\\])*)*) == " +
+      "^(L[\\w_\\$/]+(?:\\.[\\w_\\$]+(?:\\[[\\#\\!]*[0-9]+\\])*)*) ([=><!]+) " +
       "((?:(?:[\\#\\!]*[\\-0-9]+[\\|]*)+)|(?:(?:\\#\\#[\\S]*)+))$"); // Lorg/apache/log4j/NDC.ht == #!21474836471; Lorg/apache/log4j/NDC.ht[#!1] == #!21474836471, Lorg/apache/log4j/NDC.str == ##str 
   private static void parseFieldAccess(String modelLine, IR ir, Hashtable<String, List<Instance>> modelInstanceMap, 
       Hashtable<String, Instance> nameInstanceMap, Hashtable<Instance, String> instanceNameMap,  
@@ -181,8 +261,8 @@ public class Requirements {
       Pattern pattern = modelLine.startsWith("L") ? s_pattern2 : s_pattern1;
       
       if ((matcher = pattern.matcher(modelLine)).find()) {
-        String left  = matcher.group(1);
-        String right = matcher.group(2);
+        String left    = matcher.group(1);
+        String right   = matcher.group(3);
         
         String[] fieldNames = left.split("\\.");
         String varName = fieldNames[0];
@@ -249,10 +329,10 @@ public class Requirements {
         instanceModelMap.put(currentInstance, right);
       }
       else {
-        System.err.println("Unable to analyze model line: " + modelLine);
+        //System.err.println("Unable to analyze model line: " + modelLine);
       }
     } catch (Exception e) {
-      System.err.println("Unable to analyze model line: " + modelLine);
+      //System.err.println("Unable to analyze model line: " + modelLine);
     }
   }
   
@@ -268,8 +348,9 @@ public class Requirements {
       Pattern pattern = modelLine.startsWith("L") ? s_pattern2 : s_pattern1;
 
       if ((matcher = pattern.matcher(modelLine)).find()) {
-        String left  = matcher.group(1);
-        String right = matcher.group(2);
+        String left    = matcher.group(1);
+        String right   = matcher.group(3);
+        String compStr = matcher.group(2);
         
         String[] fieldNames = left.split("\\.");
         String varName = fieldNames[0];
@@ -329,8 +410,10 @@ public class Requirements {
         
         // create binary term
         Instance rightInstance = new Instance(right, currentType, null);
-        Comparator comp = Comparator.OP_EQUAL;
-        if (right.startsWith("#!")) {
+        
+        // create comparator
+        Comparator comp = parseCompString(compStr);
+        if (comp == Comparator.OP_EQUAL && right.startsWith("#!")) {
           if (right.equals("#!21474836471")) {
             rightInstance = new Instance("null", currentType, null);
           }
@@ -394,7 +477,7 @@ public class Requirements {
   // return a list of terms because e.g. in (#!104306348577 @ #!0) == #!49085340507
   // #!104306348577 may correspond to multiple instances
   private static final Pattern s_pattern3 = Pattern.compile(
-      "^\\(([\\#\\!]*[0-9]+) @ ([\\#\\!]*[0-9]+)\\) == ((?:(?:[\\#\\!]*[\\-0-9]+[\\|]*)+)|(?:(?:\\#\\#[\\S]*)+))$"); // (#!16642998279 @ #!0) == #!2147483649, (#!16642998279 @ #!0) == ##str
+      "^\\(([\\#\\!]*[0-9]+) @ ([\\#\\!]*[0-9]+)\\) ([=><!]+) ((?:(?:[\\#\\!]*[\\-0-9]+[\\|]*)+)|(?:(?:\\#\\#[\\S]*)+))$"); // (#!16642998279 @ #!0) == #!2147483649, (#!16642998279 @ #!0) == ##str
   private static List<BinaryConditionTerm> parseArrayModelTerm(String modelLine, Hashtable<String, String> nameExplicitTypeMap, 
       Hashtable<String, Instance> nameInstanceMap, Hashtable<Instance, String> instanceNameMap, 
       Hashtable<String, List<Instance>> modelInstanceMap, Hashtable<Instance, String> instanceModelMap) {
@@ -402,9 +485,10 @@ public class Requirements {
     
     Matcher matcher = null;
     if ((matcher = s_pattern3.matcher(modelLine)).find()) {
-      String left  = matcher.group(1);
-      String index = matcher.group(2);
-      String right = matcher.group(3);
+      String left    = matcher.group(1);
+      String index   = matcher.group(2);
+      String right   = matcher.group(4);
+      String compStr = matcher.group(3);
 
       // making an assumption that, left can only be non-array element
       List<Instance> instances = modelInstanceMap.get(left);
@@ -455,8 +539,10 @@ public class Requirements {
           
           // create binary term
           Instance rightInstance = new Instance(right, elemType, null);
-          Comparator comp = Comparator.OP_EQUAL;
-          if (right.startsWith("#!")) {
+          
+          // create comparator
+          Comparator comp = parseCompString(compStr);
+          if (comp == Comparator.OP_EQUAL && right.startsWith("#!")) {
             if (right.equals("#!21474836471")) {
               rightInstance = new Instance("null", elemType, null);
             }
@@ -477,6 +563,29 @@ public class Requirements {
     }
     
     return terms;
+  }
+  
+  private static Comparator parseCompString(String compStr) {
+    Comparator comp = null;
+    if (compStr.equals("==")) {
+      comp = Comparator.OP_EQUAL;
+    }
+    else if (compStr.equals("!=")) {
+      comp = Comparator.OP_INEQUAL;
+    }
+    else if (compStr.equals(">")) {
+      comp = Comparator.OP_GREATER;
+    }
+    else if (compStr.equals(">=")) {
+      comp = Comparator.OP_GREATER_EQUAL;
+    }
+    else if (compStr.equals("<")) {
+      comp = Comparator.OP_SMALLER;
+    }
+    else if (compStr.equals("<=")) {
+      comp = Comparator.OP_SMALLER_EQUAL;
+    }
+    return comp;
   }
 
   private static void addToRequirements(Requirements requirements, Condition condition, 

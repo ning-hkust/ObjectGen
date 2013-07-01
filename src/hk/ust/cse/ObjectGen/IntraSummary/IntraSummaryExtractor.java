@@ -168,11 +168,11 @@ public class IntraSummaryExtractor {
   public static void main(String args[]) throws Exception {
     if (args.length == 0) {
       //String appJar = "D:/Projects/BranchModelGenerator/targets/apache-commons-collections/target/commons-collections-3.2.1.jar";
-      String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-log4j/targets/log4j-1.2.15_removed.jar";
+      String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-commons-collections/targets/commons-collections-4.0-r1351903.jar";
       String pseudoImplJar = "./lib/hk.ust.cse.Prevision_PseudoImpl.jar"; 
       IntraSummaryExtractor extractor = new IntraSummaryExtractor(appJar, pseudoImplJar);
 
-      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "java.lang.Boolean.getBoolean(Ljava/lang/String;)Z");
+      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "hk.ust.cse.Prevision_PseudoImpl.Map.put(Lhk/ust/cse/Prevision_PseudoImpl/HashCode;Ljava/lang/Object;)Ljava/lang/Object;");
 
       String methodSig = ir.getMethod().getSignature();
       List<Summary> intraSummaries = extractor.extract(methodSig, true, 100000);

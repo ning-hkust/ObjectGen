@@ -4,7 +4,6 @@ import hk.ust.cse.ObjectGen.Generation.Generator;
 import hk.ust.cse.ObjectGen.Generation.Requirement;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Sequence;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Variable;
-import hk.ust.cse.Prevision.PathCondition.BinaryConditionTerm;
 import hk.ust.cse.Wala.Jar2IR;
 
 import java.util.Hashtable;
@@ -21,28 +20,28 @@ public class SimpleGenerator extends AbstractGenerator {
   @Override
   public Sequence generate(Requirement req, List<Requirement> ancestorReqs) {
     Sequence seq = null;
-    if (onlyVarNotNullReq(req, "v9999")) {
-      BinaryConditionTerm binaryTerm = req.getCondition(0).getOnlyBinaryTerm();
-      String typeName = binaryTerm.getInstance1().getLastReference() != null ? 
-          binaryTerm.getInstance1().getLastRefType() : binaryTerm.getInstance2().getLastRefType(); // v1 != null or null != v1
-
-      if (typeName.equals("Ljava/net/URL")) {
+    
+    if (req.containsCondition("v9999 != null")) {
+      if (req.getTargetType() == java.net.URL.class) {
         seq = createURL();
       }
-      else if (typeName.equals("Ljava/math/BigDecimal")) {
+      else if (req.getTargetType() == java.math.BigDecimal.class) {
         seq = createBigDecimal();
       }
-      else if (typeName.equals("Ljava/math/BigInteger")) {
+      else if (req.getTargetType() == java.math.BigInteger.class) {
         seq = createBigInteger();
       }
-      else if (typeName.equals("Ljava/io/File")) {
+      else if (req.getTargetType() == java.io.File.class) {
         seq = createFile();
       }
-      else if (typeName.equals("Ljava/lang/Package")) {
+      else if (req.getTargetType() == java.lang.Package.class) {
         seq = createPackage();
       }
-      else if (typeName.equals("Ljava/net/InetAddress")) {
+      else if (req.getTargetType() == java.net.InetAddress.class) {
         seq = createInetAddress();
+      }
+      else if (req.getTargetType() == java.lang.String.class && req.containsCondition("v9999 == ##%existing_file%")) {
+        seq = createExistingFilePath();
       }
     }
     return seq;
@@ -76,11 +75,18 @@ public class SimpleGenerator extends AbstractGenerator {
     return createObject("Ljava/io/File", "java.io.File.<init>(Ljava/lang/String;)V", parameters);
   }
   
+  private Sequence createExistingFilePath() {
+    Hashtable<String, Variable> parameters = new Hashtable<String, Variable>();
+    Variable param1 = new Variable("java.io.File.createTempFile(\"star-\", \".tmp\", new java.io.File(\"./\"))", "Ljava/io/File");
+    parameters.put("v1", param1);
+    return createObject("Ljava/lang/String", "java.io.File.getPath()Ljava/lang/String;", parameters);
+  }
+  
   private Sequence createPackage() {
     Hashtable<String, Variable> parameters = new Hashtable<String, Variable>();
     Variable param1 = new Variable("\"java.lang\"", "Ljava/lang/String");
     parameters.put("v1", param1);
-    return createObject("Ljava/lang/Package", "java.lang.Package.getPackage(Ljava/lang/String;)Ljava/lang/Package", parameters);
+    return createObject("Ljava/lang/Package", "java.lang.Package.getPackage(Ljava/lang/String;)Ljava/lang/Package;", parameters);
   }
   
   private Sequence createInetAddress() {

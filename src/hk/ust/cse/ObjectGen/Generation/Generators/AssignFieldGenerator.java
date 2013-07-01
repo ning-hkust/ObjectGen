@@ -1,6 +1,7 @@
 package hk.ust.cse.ObjectGen.Generation.Generators;
 
 import hk.ust.cse.ObjectGen.Generation.Generator;
+import hk.ust.cse.ObjectGen.Generation.HashCodeMap;
 import hk.ust.cse.ObjectGen.Generation.Requirement;
 import hk.ust.cse.ObjectGen.Generation.Requirements;
 import hk.ust.cse.ObjectGen.Generation.TestCase.AssignmentStatement;
@@ -26,7 +27,6 @@ public class AssignFieldGenerator extends AbstractGenerator {
 
   // assuming that, all fields in req are accessible, currently only support static fields
   @Override
-  @SuppressWarnings("unchecked")
   public Sequence generate(Requirement req, List<Requirement> ancestorReqs) {
     Sequence genSequence = null;
     
@@ -69,8 +69,9 @@ public class AssignFieldGenerator extends AbstractGenerator {
             }
             
             Field targetField = Utils.getInheritedField(targetType, fieldName);
-            if (targetField != null && 
-                Modifier.isPublic(targetField.getModifiers()) && !Modifier.isFinal(targetField.getModifiers())) {
+            if (targetField != null && !Modifier.isFinal(targetField.getModifiers()) && 
+                (m_accessibility == 0 && Modifier.isPublic(targetField.getModifiers()) || 
+                (m_accessibility == 1 && !Modifier.isPrivate(targetField.getModifiers())))) {
               
               Instance instance = fieldInstanceMap.get(fieldName);
               if (instance == null) {
@@ -119,8 +120,7 @@ public class AssignFieldGenerator extends AbstractGenerator {
             (m_accessibility == 1 && !Modifier.isPrivate(targetType.getModifiers()))) { 
           if (req.getTargetInstance().getLastRefName().startsWith("L")) { // Lorg/apache/log4j/NDC
             // generate recursively for the child requirements
-            Hashtable<Long, String> prevHashCodeVarMap = 
-                (Hashtable<Long, String>) m_allTypeGenerator.getHashCodeVarMap().clone();
+            HashCodeMap prevHashCodeVarMap = m_allTypeGenerator.getHashCodeVarMap().clone();
             GenerationResult genResult = m_allTypeGenerator.gen4ChildReqs(childReqs, ancestorReqs);
             
             if (!genResult.hasNotSat()) {
@@ -136,7 +136,7 @@ public class AssignFieldGenerator extends AbstractGenerator {
                 Sequence sequence = genResult.getSequence(fieldName);
                 genSequence.mergeSequence(sequence);
                 
-                assignTo = new Variable(className + "." + fieldName, null);
+                assignTo = new Variable(classJavaName + "." + fieldName, null);
                 AssignmentStatement statement = new AssignmentStatement(assignTo, sequence.getKeyVariable());
                 statement.setFieldDeclClassType(targetTypeName);
                 genSequence.addStatement(statement);

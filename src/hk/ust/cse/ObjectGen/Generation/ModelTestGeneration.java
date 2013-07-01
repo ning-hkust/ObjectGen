@@ -206,7 +206,7 @@ public class ModelTestGeneration {
       }
       
       // save test case
-      if (genResult.getSequenceCount() > 0) {
+      if (genResult.getSequenceCount() > 0 || requirements.size() == 0) {
         
         // output to console
         System.out.println(fullGenSize + " / " + requirements.size() + " requirements have been generated!");
@@ -378,60 +378,66 @@ public class ModelTestGeneration {
     
     // append method invocation
     IMethod method = ir.getMethod();
-    if (method.isInit()) {
-      sourceCode.append("    new ").append(Utils.getClassTypeJavaStr(method.getDeclaringClass().getName().toString()));
-    }
-    else {
-      String caller = null;
-      if (method.isStatic()) {
-        caller = Utils.getClassTypeJavaStr(method.getDeclaringClass().getName().toString());
-      }
-      else {
-        Sequence seq = genResult.getSequence("v1");
-        if (seq != null) {
-          caller = seq.getKeyVariable().getVarName();
+    if (!method.isClinit()) {
+      if (!method.isInit()) {
+        String caller = null;
+        if (method.isStatic()) {
+          caller = Utils.getClassTypeJavaStr(method.getDeclaringClass().getName().toString());
         }
         else {
-          String varType = ir.getParameterType(0).getName().toString();
-          caller = "// " + Utils.getTypeRandomValue(varType.equals("J") ? "I" : varType); // avoid null dereference
+          Sequence seq = genResult.getSequence("v1");
+          if (seq != null) {
+            caller = seq.getKeyVariable().getVarName();
+          }
+          else {
+            String varType = ir.getParameterType(0).getName().toString();
+            caller = "// " + Utils.getTypeRandomValue(varType.equals("J") ? "I" : varType); // avoid null dereference
+          }
         }
-      }
-      sourceCode.append("    ").append(caller).append(".").append(method.getName().toString());
-    }
-    
-    // append the parameters of invocation
-    sourceCode.append("(");
-    for (int i = method.isStatic() ? 0 : 1, size = ir.getNumberOfParameters(); i < size; i++) {
-      String paramName   = "v" + (i + 1);
-      String paramType = ir.getParameterType(i).getName().toString();
-
-      // the corresponding real variable name
-      Sequence seq = genResult.getSequence(paramName);
-      String realParamName = null;
-      if (seq != null) {
-        realParamName = seq.getKeyVariable().getVarName();
+        sourceCode.append("    ").append(caller).append(".").append(method.getName().toString());
       }
       else {
-        realParamName = Utils.getTypeRandomValue(paramType.equals("J") ? "I" : paramType);
-        realParamName = paramType.equals("C") ? "'" + realParamName + "'" : realParamName;
+        sourceCode.append("    new ").append(Utils.getClassTypeJavaStr(method.getDeclaringClass().getName().toString()));
       }
       
-      // append the parameters
-      if (Utils.isPrimitiveType(paramType)) {
-        paramType = Utils.getClassTypeJavaStr(paramType);
-        sourceCode.append("(").append(paramType).append(") ");
-      }
-      else {
-        Class<?> cls = Utils.findClass(paramType);
-        if (cls != null && Modifier.isPublic(cls.getModifiers())) {
+      // append the parameters of invocation
+      sourceCode.append("(");
+      for (int i = method.isStatic() ? 0 : 1, size = ir.getNumberOfParameters(); i < size; i++) {
+        String paramName   = "v" + (i + 1);
+        String paramType = ir.getParameterType(i).getName().toString();
+
+        // the corresponding real variable name
+        Sequence seq = genResult.getSequence(paramName);
+        String realParamName = null;
+        if (seq != null) {
+          realParamName = seq.getKeyVariable().getVarName();
+        }
+        else {
+          realParamName = Utils.getTypeRandomValue(paramType.equals("J") ? "I" : paramType);
+          realParamName = paramType.equals("C") ? "'" + realParamName + "'" : realParamName;
+        }
+        
+        // append the parameters
+        if (Utils.isPrimitiveType(paramType)) {
           paramType = Utils.getClassTypeJavaStr(paramType);
           sourceCode.append("(").append(paramType).append(") ");
         }
+        else {
+          Class<?> cls = Utils.findClass(paramType);
+          if (cls != null && Modifier.isPublic(cls.getModifiers())) {
+            paramType = Utils.getClassTypeJavaStr(paramType);
+            sourceCode.append("(").append(paramType).append(") ");
+          }
+        }
+        sourceCode.append(realParamName);
+        if (i != size - 1) {
+          sourceCode.append(", ");
+        }
       }
-      sourceCode.append(realParamName);
-      if (i != size - 1) {
-        sourceCode.append(", ");
-      }
+    }
+    else {
+      sourceCode.append("    Class.forName(\"")
+                .append(Utils.getClassTypeJavaStr(method.getDeclaringClass().getName().toString())).append("\"");
     }
     sourceCode.append(");\n");
     
@@ -618,8 +624,8 @@ public class ModelTestGeneration {
         }
       }
 
-      if (protectedMethods.size() > 0 || 
-          (Modifier.isPublic(key2.getModifiers()) || Modifier.isProtected(key2.getModifiers()))) {
+      if (protectedMethods.size() > 0 || (key2 != null && 
+          (Modifier.isPublic(key2.getModifiers()) || Modifier.isProtected(key2.getModifiers())))) {
         String genCode = ExtendClassUtils.extendClass(m_generator.getWalaAnalyzer(), key, protectedMethods);
         extendsCodeMap.put(key, genCode);
       }
@@ -692,7 +698,8 @@ public class ModelTestGeneration {
       
       HashSet<IR> methods = extendedClasses.get(key);
       for (IR ir : methods) {
-        if (!ir.getMethod().isPublic() && !ir.getMethod().isPrivate() && !ir.getMethod().isProtected()) {
+        if (!ir.getMethod().isPublic() && !ir.getMethod().isPrivate() && 
+            !ir.getMethod().isProtected() && !ir.getMethod().isClinit()) {
           int index = declClassName.lastIndexOf('/');
           if (index >= 0) {
             pkgName = Utils.getClassTypeJavaStr(declClassName.substring(0, index));
@@ -706,7 +713,7 @@ public class ModelTestGeneration {
       // if the class itself is default, also generate package name
       if (pkgName.length() == 0) {
         Class<?> declClass = Utils.findClass(key.getName().toString());
-        if (!Modifier.isPublic(declClass.getModifiers()) && 
+        if (declClass != null && !Modifier.isPublic(declClass.getModifiers()) && 
             !Modifier.isPrivate(declClass.getModifiers()) && !Modifier.isProtected(declClass.getModifiers())) {
           int index = declClassName.lastIndexOf('/');
           if (index >= 0) {

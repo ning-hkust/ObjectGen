@@ -4,7 +4,6 @@ import hk.ust.cse.ObjectGen.Generation.Generators.GenerationResult;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Sequence;
 
 import java.util.Enumeration;
-import java.util.Hashtable;
 
 
 public class GenerationThread extends Thread {
@@ -32,7 +31,7 @@ public class GenerationThread extends Thread {
     m_genResult = new GenerationResult();
     
     // supporting vars for generation
-    Hashtable<Long, String> hashCodeVarMap = new Hashtable<Long, String>();
+    HashCodeMap hashCodeVarMap = new HashCodeMap();
     
     // generate sequence for each parameter
     Enumeration<String> keys = m_requirements.keys();
@@ -40,9 +39,7 @@ public class GenerationThread extends Thread {
       String varName = (String) keys.nextElement();
       Requirement req = m_requirements.getRequirement(varName);
 
-      @SuppressWarnings("unchecked")
-      Hashtable<Long, String> prevHashCodeVarMap = 
-          (Hashtable<Long, String>) hashCodeVarMap.clone();
+      HashCodeMap prevHashCodeVarMap = hashCodeVarMap.clone();
       Sequence sequence = m_generator.generate(req, m_varNamePool, hashCodeVarMap);
       if (sequence != null) {
         m_genResult.addSequence(varName, sequence);

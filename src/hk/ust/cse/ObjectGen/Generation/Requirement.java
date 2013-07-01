@@ -15,9 +15,9 @@ import java.util.List;
 public class Requirement {
 
   public Requirement(String varName) {
-    m_varName          = varName;
-    m_conditions = new ArrayList<Condition>();
-    m_compareStrings   = new HashSet<String>();
+    m_varName        = varName;
+    m_conditions     = new ArrayList<Condition>();
+    m_compareStrings = new HashSet<String>();
   }
   
   public void addCondition(Condition condition) {
@@ -85,6 +85,10 @@ public class Requirement {
     return m_targetInstance;
   }
   
+  public String getTargetInstanceName() {
+    return m_targetInstance.toString();
+  }
+  
   public Class<?> getTargetType() {
     return m_targetType;
   }
@@ -95,6 +99,24 @@ public class Requirement {
   
   public boolean getUseInnerClass() {
     return m_useInnerClass;
+  }
+  
+  public boolean containsCondition(String conditionStr) {
+    // ignore type conditions
+    List<Condition> nonTypeConditions = new ArrayList<Condition>();
+    for (Condition condition : m_conditions) {
+      if (condition.getOnlyTypeTerm() == null) {
+        nonTypeConditions.add(condition);
+      }
+    }
+
+    boolean contains = false;
+    for (int i = 0, size = nonTypeConditions.size(); i < size && !contains; i++) {
+      BinaryConditionTerm term = nonTypeConditions.get(i).getOnlyBinaryTerm();
+      String termStr = term != null ? term.toString() : null;
+      contains = termStr != null && termStr.equals(conditionStr);
+    }
+    return contains;
   }
   
   // >=

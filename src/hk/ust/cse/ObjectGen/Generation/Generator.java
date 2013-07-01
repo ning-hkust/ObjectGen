@@ -23,7 +23,6 @@ import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashSet;
-import java.util.Hashtable;
 import java.util.List;
 
 public class Generator {
@@ -60,7 +59,7 @@ public class Generator {
     m_assignFieldGenerator = new AssignFieldGenerator(this, accessibility);
   }
   
-  public Sequence generate(Requirement req, VarNamePool varNamePool, Hashtable<Long, String> hashCodeVarMap) {
+  public Sequence generate(Requirement req, VarNamePool varNamePool, HashCodeMap hashCodeVarMap) {
     m_stopFlag       = false;
     m_varNamePool    = varNamePool;
     m_hashCodeVarMap = hashCodeVarMap;
@@ -84,7 +83,7 @@ public class Generator {
       }
       
       // try simple generator first
-      if (genSequence == null) {
+      if (genSequence == null && req.getTargetInstanceName().equals("v9999") /* avoid static fields */) {
         genSequence = m_simpleGenerator.generate(req, ancestorReqs);
       }
 
@@ -123,7 +122,7 @@ public class Generator {
       
       // generation sequence of object of this hashcode
       if (creating4Hash != null && genSequence != null) {
-        m_hashCodeVarMap.put(creating4Hash, genSequence.getKeyVariable().getVarName());
+        m_hashCodeVarMap.putVarName(creating4Hash, genSequence.getKeyVariable().getVarName());
       }
     } catch (Exception e) {e.printStackTrace();}
 
@@ -166,6 +165,9 @@ public class Generator {
     while (keys.hasMoreElements() && !genResult.hasNotSat() && !getStopFlag()) {
       String varName = (String) keys.nextElement();
       Requirement childReq = childReqs.getRequirement(varName);
+      
+      printStepSpaces(ancestorReqs.size());
+      System.out.println("To generate: " + varName);
       
       // try to find a match from cache first
       Sequence sequence    = null;
@@ -230,7 +232,7 @@ public class Generator {
             req.getConditions().remove(i--);
           }
           else {
-            String varForThisValue = m_hashCodeVarMap.get(modelValue);
+            String varForThisValue = m_hashCodeVarMap.getVarName(modelValue);
             if (varForThisValue != null) { // object for this hash code has been created already
               String typeName = "Ljava/lang/Object";
               Variable assignTo   = new Variable(m_varNamePool.nextVariableName(), typeName);
@@ -347,7 +349,7 @@ public class Generator {
     return m_varNamePool;
   }
   
-  public Hashtable<Long, String> getHashCodeVarMap() {
+  public HashCodeMap getHashCodeVarMap() {
     return m_hashCodeVarMap;
   }
   
@@ -355,8 +357,14 @@ public class Generator {
     m_stopFlag = true;
   }
   
-  public void setHashCodeVarMap(Hashtable<Long, String> hashCodeVarMap) {
+  public void setHashCodeVarMap(HashCodeMap hashCodeVarMap) {
     m_hashCodeVarMap = hashCodeVarMap;
+  }
+  
+  private void printStepSpaces(int step) {
+    for (int j = 0; j < step; j++) {
+      System.out.print(">>");
+    }
   }
   
 //  // obj.size == 3
@@ -429,7 +437,7 @@ public class Generator {
     
     Generator generator = new Generator("./hk.ust.cse.ObjectGen.jar", "./java_summaries/", "./summaries/", 
         "./lib/hk.ust.cse.Prevision_PseudoImpl.jar", new HashSet<String>(), 5, 1, 1, true);
-    Sequence sequence = generator.generate(req, new VarNamePool(), new Hashtable<Long, String>());
+    Sequence sequence = generator.generate(req, new VarNamePool(), new HashCodeMap());
     if (sequence != null) {
       System.out.println(sequence.toString());
     }
@@ -440,7 +448,7 @@ public class Generator {
   
   private boolean                    m_stopFlag;
   private VarNamePool                m_varNamePool;
-  private Hashtable<Long, String>    m_hashCodeVarMap;
+  private HashCodeMap                m_hashCodeVarMap;
   private final int                  m_maxStep;
   private final int                  m_maxSubClasses;
   private final boolean              m_allowStaticNotSat;

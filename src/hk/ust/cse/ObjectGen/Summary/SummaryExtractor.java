@@ -316,6 +316,17 @@ public class SummaryExtractor {
       }
     }
     
+    // remove TypeConditions related to pseudo implements
+    for (int j = 0, size = lastExpanded.size(); j < size; j++) {
+      Summary summary = lastExpanded.get(j);
+      for (int k = 0; k < summary.getPathConditions().size(); k++) {
+        Condition cond = summary.getPathConditions().get(k);
+        if (cond.getOnlyTypeTerm() != null && cond.getOnlyTypeTerm().toString().contains("Prevision_PseudoImpl")) {
+          summary.getPathConditions().remove(k--);
+        }
+      }
+    }
+    
     // since we are using simple check instead of full SMT check during merging, it is possible 
     // that there might be unsatisfiable ones in the final list, do one more round of full SMT check
     System.out.print("Perferming last full check (" + lastExpanded.size() + "): ");
@@ -911,7 +922,7 @@ public class SummaryExtractor {
       Reference fieldRefTo = instance.getField(fieldRef.getName());
       for (Instance oldInstance : new ArrayList<Instance>(fieldRef.getOldInstances())) {
         Instance replacedOld = replaceInstance(oldInstance, replaceMap, replacedMap, prevInstances);
-        if (replacedOld != oldInstance) {
+        if (!fieldRefTo.getOldInstances().contains(replacedOld)) {
           fieldRefTo.getOldInstances().remove(oldInstance);
           fieldRefTo.getOldInstances().add(replacedOld);
           setInstanceLifeTime(fieldRefTo, fieldRef, replacedOld, oldInstance, null);
@@ -1143,9 +1154,10 @@ public class SummaryExtractor {
     if (args.length == 0) {
       //String appJar = "D:/Projects/BranchModelGenerator/targets/apache-commons-collections/target/commons-collections-3.2.1.jar";
       //String appJar = "D:/Projects/BranchModelGenerator/targets/sat4j/target/org.sat4j.core-2.2.0.jar";
-      //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-ant/targets/ant-all-1.7.0_removed.jar";
-      String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-log4j/targets/log4j-1.2.15_removed.jar";
-      //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-commons-collections/targets/commons-collections-3.1.jar";
+      //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-ant/targets/ant-all-1.8.2_removed.jar";
+      //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-log4j/targets/log4j-1.2.14_removed.jar";
+      String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-commons-collections/targets/commons-collections-4.0-r1351903.jar";
+      //String appJar = "D:/Projects/STAR/experiments/ObjectGen/crawler4j/targets/crawler4j-3.3.jar";
       //String appJar = "D:/Projects/ObjectGen/hk.ust.cse.ObjectGen.jar";
       String pseudoImplJar = "./lib/hk.ust.cse.Prevision_PseudoImpl.jar";
       SummaryExtractor extractor = new SummaryExtractor(appJar, pseudoImplJar);
@@ -1180,7 +1192,7 @@ public class SummaryExtractor {
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$TreeListIterator.next()Ljava/lang/Object;");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.iterators.ObjectGraphIterator.findNextByIterator(Ljava/util/Iterator;)V");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.iterators.ObjectGraphIterator.next()Ljava/lang/Object;");
-      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "java.lang.Double.toHexString(D)Ljava/lang/String;");
+      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.map.ListOrderedMap.put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
       
       // read the list of all/filter/extracted methods
       HashSet<String> allMethodSet = Utils.readStringSetFromFile("./summaries/all_methods.txt");

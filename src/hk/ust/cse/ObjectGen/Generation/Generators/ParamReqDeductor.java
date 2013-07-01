@@ -61,11 +61,16 @@ public class ParamReqDeductor {
     List<BinaryConditionTerm> nonParamTerms = new ArrayList<BinaryConditionTerm>();
     keyVariable = parseSatModel(m_smtChecker.getLastResult().getSatModel(), 
         modelConditions, nonParamTerms, req.getTargetInstance() != null, validateFormula);
-    
-    // target does not come from any of the param, so it should come from RET or we do not need it
-    if (keyVariable == null && !m_ir.getMethod().getReturnType().getName().toString().equals("V")) {
-      keyVariable = new Variable(m_objGenerator.nextVariableName(), req.getTargetInstance().getLastRefType());
-      returnValIsKey = true;
+    // target does not come from any of the parameters, so it 
+    // should come from RET or static field or we do not need it
+    if (keyVariable == null) {
+      if (req.getTargetInstanceName().startsWith("L")) { // Lorg/apache/log4j/LogManager
+        keyVariable = new Variable(req.getTargetInstanceName(), req.getTargetInstance().getLastRefType());
+      }
+      else if (!m_ir.getMethod().getReturnType().getName().toString().equals("V")) {
+        keyVariable = new Variable(m_objGenerator.nextVariableName(), req.getTargetInstance().getLastRefType());
+        returnValIsKey = true;
+      }
     }
     
     // no way we can satisfy them because they are not parameters
@@ -79,22 +84,22 @@ public class ParamReqDeductor {
                                ((Modifier.isProtected(reqTargetType.getModifiers()) || 
                                  Modifier.isAbstract(reqTargetType.getModifiers())) && m_ir.getMethod().isInit())));
     
-    // ArrayList/Vector.elementData.length hack: Since solver only outputs one model, 
-    // thus limiting the elementData.length field to a particular value. However, in 
-    // reality, elementData.length can always be handled properly by ArrayList/Vector, 
-    // thus, we manual set the value to 10 so that the simple constructor can be used.
-    for (int i = 0, size = modelConditions.size(); i < size; i++) {
-      Condition condition = modelConditions.get(i);
-      if (condition.getConditionTerms().size() == 1) {
-        ConditionTerm term = condition.getConditionTerms().get(0);
-        if (term instanceof BinaryConditionTerm) {
-          BinaryConditionTerm newTerm = Requirements.elementDataLengthHack((BinaryConditionTerm) term);
-          if (newTerm != term) {
-            modelConditions.set(i, new Condition(newTerm));
-          }
-        }
-      }
-    }
+//    // ArrayList/Vector.elementData.length hack: Since solver only outputs one model, 
+//    // thus limiting the elementData.length field to a particular value. However, in 
+//    // reality, elementData.length can always be handled properly by ArrayList/Vector, 
+//    // thus, we manual set the value to 10 so that the simple constructor can be used.
+//    for (int i = 0, size = modelConditions.size(); i < size; i++) {
+//      Condition condition = modelConditions.get(i);
+//      if (condition.getConditionTerms().size() == 1) {
+//        ConditionTerm term = condition.getConditionTerms().get(0);
+//        if (term instanceof BinaryConditionTerm) {
+//          BinaryConditionTerm newTerm = Requirements.elementDataLengthHack((BinaryConditionTerm) term);
+//          if (newTerm != term) {
+//            modelConditions.set(i, new Condition(newTerm));
+//          }
+//        }
+//      }
+//    }
 
     // only use concrete model values for inter-related variables
     Hashtable<Instance, Requirement> requirementsMap = 
@@ -213,44 +218,29 @@ public class ParamReqDeductor {
     
     // add requirement condition: target == v1 or v2 or ... or RET (postcondition)
     if (req.getTargetInstance() != null) {
-      BinaryConditionTerm term = null;
-//      String methodSig = summary.getMethodData().getMethodSignature();
-//      if (!methodSig.startsWith("hk.ust.cse.Prevision_PseudoImpl.Map.put") && 
-//          !methodSig.startsWith("hk.ust.cse.Prevision_PseudoImpl.Table.put")) {
-//        // target == v1 or v2 or ... or RET (postcondition)
-//        for (int i = 1; i <= summary.getMethodData().getParamList().size(); i++) {
-//          Reference reference = effect.get("v" + i);
-//          ConditionTerm term = new BinaryConditionTerm(
-//              req.getTargetInstance(), Comparator.OP_EQUAL, reference.getInstance());
-//          terms.add(term);
-//        }
-//        
-//        if (effect.containsKey("RET")) { // this invocation does not return void
-//          Reference reference = effect.get("RET");
-//          Instance retInstance = toRelationInstance(relationMap, readFieldMap, reference.getInstance(), readRelNameMap);
-//          ConditionTerm term = new BinaryConditionTerm(
-//              req.getTargetInstance(), Comparator.OP_EQUAL, retInstance);
-//          terms.add(term);
-//        }
-//      }
-//      else {
+      List<ConditionTerm> terms = new ArrayList<ConditionTerm>();
+
       if (!summary.getMethodData().isStatic() && !m_isFactoryOrCreateInner) {
-        // only allow target == v1
-        Reference reference = effect.get("v1");
-        term = new BinaryConditionTerm(req.getTargetInstance(), Comparator.OP_EQUAL, reference.getInstance());
-        
-        // set to real type
-        reference.setType(req.getTargetInstance().getLastRefType());
+        // target == v1 or v2 or ...
+        for (int i = 1; i <= summary.getMethodData().getParamList().size() && i <= 1 /* only allow target == v1 */; i++) {
+          Reference reference = effect.get("v" + i);
+          ConditionTerm term = new BinaryConditionTerm(
+              req.getTargetInstance(), Comparator.OP_EQUAL, reference.getInstance());
+          terms.add(term);
+          
+          if (i == 1) {
+            reference.setType(req.getTargetInstance().getLastRefType()); // set to real type
+          }
+        }
       }
       else if (effect.containsKey("RET")) { // this invocation does not return void
         Reference reference = effect.get("RET");
         Instance retInstance = toRelationInstance(relationMap, readFieldMap, reference.getInstance(), readRelNameMap);
-        term = new BinaryConditionTerm(req.getTargetInstance(), Comparator.OP_EQUAL, retInstance);
+        terms.add(new BinaryConditionTerm(req.getTargetInstance(), Comparator.OP_EQUAL, retInstance));
         instanceMap.put(reference.getInstance(), retInstance);
       }
-//      }
-      if (term != null) {
-        conditionList.add(new Condition(term));
+      if (terms.size() > 0) {
+        conditionList.add(new Condition(terms));
       }
     }
 
@@ -730,13 +720,19 @@ public class ParamReqDeductor {
       TypeConditionTerm typeSatModelTerm = (TypeConditionTerm) satModelTerm;
       instanceTypeMap.put(typeSatModelTerm.getInstance1(), typeSatModelTerm.getTypeString());
     }
-    
+
     // collect all instances which have type constraints on them
     HashSet<Instance> instancesWithTypeTerm = new HashSet<Instance>();
     for (Condition condition : validateFormula.getConditionList()) {
       for (ConditionTerm term : condition.getConditionTerms()) {
         if (term instanceof TypeConditionTerm) {
           instancesWithTypeTerm.add(((TypeConditionTerm) term).getInstance1());
+        }
+        else if (term instanceof BinaryConditionTerm) {
+          Instance instance1 = ((BinaryConditionTerm) term).getInstance1();
+          if (instance1.getLastReference() != null && instance1.getLastRefName().startsWith(("__instanceof__"))) {
+            instancesWithTypeTerm.add(instance1.getLastReference().getDeclaringInstance());
+          }
         }
       }
     }
@@ -765,7 +761,8 @@ public class ParamReqDeductor {
            !lastRef.getName().startsWith("java.lang.System.") &&  // give a wild card to java.lang.System.
            !lastRef.getName().startsWith("java.lang.Runtime.") && // give a wild card to java.lang.Runtime.
            !lastRef.getName().startsWith("java.lang.Integer.") && // give a wild card to java.lang.Integer.
-           !lastRef.getName().startsWith("java.lang.Class.")) { // give a wild card to java.lang.Class.
+           !lastRef.getName().startsWith("java.lang.Class.") && // give a wild card to java.lang.Class.
+           !lastRef.getName().startsWith("com.sun.")) { // give a wild card to com.sun.
           // e.g.: java.util.Arrays.copyOf([Ljava/lang/Object;I)[Ljava/lang/Object;_482682480861585
           nonParamStaticTerms.add(binarySatModelTerm);
           continue;
@@ -912,7 +909,8 @@ public class ParamReqDeductor {
           topInstance.getLastRefName().startsWith("java.lang.System.") || 
           topInstance.getLastRefName().startsWith("java.lang.Runtime.") || 
           topInstance.getLastRefName().startsWith("java.lang.Integer.") || 
-          topInstance.getLastRefName().startsWith("java.lang.Class."))) {
+          topInstance.getLastRefName().startsWith("java.lang.Class.") || 
+          topInstance.getLastRefName().startsWith("com.sun."))) {
         newConditionList.remove(i--);
       }
     }
@@ -1179,7 +1177,7 @@ public class ParamReqDeductor {
       HashSet<Instance> topInstances = condition.getRelatedTopInstances(summary.getRelationMap());
       if (topInstances.size() > 1) { // correlated to multiple parameters
         // use concrete values for variables in multiple parameters conditions
-        HashSet<Instance> instances = condition.getRelatedInstances(summary.getRelationMap(), false, false, true);
+        HashSet<Instance> instances = condition.getRelatedInstances(summary.getRelationMap(), false, false, true, false);
         useConcreteValues.addAll(instances); // should not have array read instances
       }
       else if (topInstances.size() > 0) {
@@ -1192,7 +1190,7 @@ public class ParamReqDeductor {
             
             // we want to use (v1.elementData @ #!0) format in the deductConditions
             if (conditionStr.contains("read_@@array_")) {
-              HashSet<Instance> instances = condition.getRelatedInstances(summary.getRelationMap(), true, false, true);
+              HashSet<Instance> instances = condition.getRelatedInstances(summary.getRelationMap(), true, false, true, false);
               for (Instance instance : instances) {
                 if (instance.isRelationRead() && !readArrayMap.containsKey(instance)) {
                   readArrayMap.put(instance, convertArrayRead1(instance, summaryArrayRel));
@@ -1211,6 +1209,13 @@ public class ParamReqDeductor {
       addedConditions.add(condition.toString());
     }
 
+    // create a model value mapping
+    Hashtable<String, String> modelValues = new Hashtable<String, String>();
+    for (Condition condition : modelConditions) {
+      modelValues.put(condition.getOnlyBinaryTerm().getInstance1().toString(), 
+                      condition.getOnlyBinaryTerm().getInstance2().toString());
+    }
+    
     // add req conditions to deductConditions
     Instance keyInstance = summary.getEffect().get(returnValIsKey ? "RET" : keyVariable.getVarName()).getInstance();
     for (Condition reqCond : req.getConditions()) {
@@ -1218,20 +1223,20 @@ public class ParamReqDeductor {
       for (ConditionTerm term : reqCond.getConditionTerms()) {
         if (term instanceof BinaryConditionTerm) {
           BinaryConditionTerm binaryTerm = (BinaryConditionTerm) term;
-          Instance instance1 = findCorrespond(binaryTerm.getInstance1(), keyInstance, summaryArrayRel);
-          Instance instance2 = findCorrespond(binaryTerm.getInstance2(), keyInstance, summaryArrayRel);
+          Instance instance1 = findCorrespond(binaryTerm.getInstance1(), keyInstance, summaryArrayRel, modelValues);
+          Instance instance2 = findCorrespond(binaryTerm.getInstance2(), keyInstance, summaryArrayRel, modelValues);
           terms.add(new BinaryConditionTerm(instance1, binaryTerm.getComparator(), instance2));
         }
         else if (term instanceof TypeConditionTerm) {
           TypeConditionTerm typeTerm = (TypeConditionTerm) term;
-          Instance instance1 = findCorrespond(typeTerm.getInstance1(), keyInstance, summaryArrayRel);
+          Instance instance1 = findCorrespond(typeTerm.getInstance1(), keyInstance, summaryArrayRel, modelValues);
           terms.add(new TypeConditionTerm(instance1, typeTerm.getComparator(), typeTerm.getTypeString()));
         }
       }
       Condition condition = new Condition(terms);
       HashSet<Instance> topInstances = condition.getRelatedTopInstances(summary.getRelationMap());
       if (topInstances.size() > 1) { // correlated to multiple parameters
-        HashSet<Instance> instances = condition.getRelatedInstances(summary.getRelationMap(), false, true, true);
+        HashSet<Instance> instances = condition.getRelatedInstances(summary.getRelationMap(), false, true, true, false);
         useConcreteValues.addAll(instances);
       }
       else if (topInstances.size() > 0) {
@@ -1243,10 +1248,10 @@ public class ParamReqDeductor {
       }
     }
     
-    // also use concrete values for v1.length and (v1 @ #!0)
+    // also use concrete values for v1.length, (v1 @ #!0) and (v1 @ (#!0 + #!1))
     for (int i = 0; i < deductConditions.size(); i++) {
       Condition condition = deductConditions.get(i);
-      HashSet<Instance> instances = condition.getRelatedInstances(summary.getRelationMap(), false, true, true);
+      HashSet<Instance> instances = condition.getRelatedInstances(summary.getRelationMap(), false, true, true, true);
       
       for (Instance instance : instances) {
         // if it is an array length instance
@@ -1261,6 +1266,11 @@ public class ParamReqDeductor {
                 !instance.hasDeclaringInstance()) {
           useConcreteValues.add(instance);
         }
+        else if (instance.getLeft() != null && instance.getLeft().getLastReference() != null && 
+                 instance.getLeft().getLastRefType().startsWith("[") && 
+                !instance.getLeft().hasDeclaringInstance()) { // (v1 @ #!0)
+          useConcreteValues.add(instance);
+        }
       }
     }
     
@@ -1272,7 +1282,7 @@ public class ParamReqDeductor {
         
         // for parameter types, we still trust the concretization from parseSatModel
         instance1 = findCorrespond(instance1, 
-            summary.getEffect().get(instance1.toString()).getInstance(), summaryArrayRel);
+            summary.getEffect().get(instance1.toString()).getInstance(), summaryArrayRel, modelValues);
         instance1.getLastReference().setType(typeName);
         
         // use concrete values for primitive and array parameters
@@ -1283,7 +1293,7 @@ public class ParamReqDeductor {
       else if (instance1.isBounded() && !instance1.isAtomic() && !instance1.getLeft().hasDeclaringInstance()) { // (v1 @ #!0)
         if (!instance1.getLeft().toString().equals("v9999")) {
           Instance found = findCorrespond(instance1, 
-              summary.getEffect().get(instance1.getLeft().toString()).getInstance(), summaryArrayRel);
+              summary.getEffect().get(instance1.getLeft().toString()).getInstance(), summaryArrayRel, modelValues);
           useConcreteValues.add(found);
         }
       }
@@ -1300,8 +1310,22 @@ public class ParamReqDeductor {
           Instance instance1 = binaryTerm.getInstance1();
           Instance instance2 = binaryTerm.getInstance2();
           Instance topInstance = instance1.getToppestInstance();
-          if (!topInstance.isBounded() && !topInstance.toString().equals("v9999")) {
+          if (!topInstance.isBounded() && !topInstance.toString().equals("v9999")) { // v1
             if (instance1.toString().equals(useConcreteValue.toString())) {
+              if (binaryTerm.isNotEqualToNull()) {
+                // necessary because useConcreteValue may contain index instance to be concretized
+                summaryConcreteMap.put(useConcreteValue, useConcreteValue);
+              }
+              else {
+                summaryConcreteMap.put(useConcreteValue, instance2);
+              }
+              modelSummaryMap.put(instance1, useConcreteValue);
+              break;
+            }
+          }
+          else if (topInstance.isBounded() && !topInstance.isAtomic() && 
+                   useConcreteValue.isBounded() && !useConcreteValue.isAtomic()) { // (v1 @ #!0)
+            if (instance1.toString().equals(useConcreteValue.computeInnerArithmetic())) {
               if (binaryTerm.isNotEqualToNull()) {
                 // necessary because useConcreteValue may contain index instance to be concretized
                 summaryConcreteMap.put(useConcreteValue, useConcreteValue);
@@ -1338,7 +1362,7 @@ public class ParamReqDeductor {
         useConcreteValueStrs.add(instance.toString());
       }
       for (Condition condition : modelConditions) {
-        HashSet<Instance> instances = condition.getRelatedInstances(new Hashtable<String, Relation>(), false, false, false);
+        HashSet<Instance> instances = condition.getRelatedInstances(new Hashtable<String, Relation>(), false, false, false, false);
         for (Instance instance : instances) {
           Instance topInstance = instance.getToppestInstance();
           if (!topInstance.toString().equals("v9999")) {
@@ -1359,6 +1383,22 @@ public class ParamReqDeductor {
         }
       }
     }
+    
+    // ArrayList/Vector.elementData.length hack: Since solver only outputs one model, 
+    // thus limiting the elementData.length field to a particular value. However, in 
+    // reality, elementData.length can always be handled properly by ArrayList/Vector, 
+    // thus, we manual set the value to 10 so that the simple constructor can be used.
+    for (int i = 0, size = deductConditions.size(); i < size; i++) {
+      BinaryConditionTerm term = deductConditions.get(i).getOnlyBinaryTerm();
+      if (term != null) {
+        BinaryConditionTerm newTerm = Requirements.elementDataLengthHack((BinaryConditionTerm) term);
+        if (newTerm != term) {
+          deductConditions.set(i, new Condition(newTerm));
+        }
+      }
+    }
+    // force to use the smallest size/elementCount value
+    Requirements.listSizeRangeHack(deductConditions);
     
     // split model by parameter and form multiple requirements
     Hashtable<Instance, Requirement> reqsMap = splitModel(deductConditions);
@@ -1403,6 +1443,9 @@ public class ParamReqDeductor {
             
             // also add __hashCond__ condition
             if (hashCodeTerm != null) {
+              if (paramInstance.getField("__hashcode__") == null) {
+                paramInstance.setField("__hashcode__", "I", "", new Instance("", null), true, true);
+              }
               Instance hashCodeInstance = paramInstance.getField("__hashcode__").getInstance();
               newReq.addCondition(new Condition(new BinaryConditionTerm(
                   hashCodeInstance, hashCodeTerm.getComparator(), hashCodeTerm.getInstance2())));
@@ -1487,7 +1530,7 @@ public class ParamReqDeductor {
   }
   
   // find the corresponding field instance (with the same field path) from findFrom
-  private Instance findCorrespond(Instance instance, Instance findFrom, Relation arrayRelation) {
+  private Instance findCorrespond(Instance instance, Instance findFrom, Relation arrayRelation, Hashtable<String, String> modelValues) {
     Instance correspond = null;
     
     // in case find from is array_@@array_
@@ -1516,7 +1559,7 @@ public class ParamReqDeductor {
           correspond = fieldInstance1;
         }
         else { // (v9999.iteratorChain.elementData @ #!0)
-          Instance topInstance2 = findCorrespond(topInstance, findFrom, arrayRelation);
+          Instance topInstance2 = findCorrespond(topInstance, findFrom, arrayRelation, modelValues);
           if (topInstance2 != null) {
             // assign type
             if (topInstance.getType() != null) {
@@ -1552,8 +1595,8 @@ public class ParamReqDeductor {
       }
     }
     else if (!instance.isAtomic()) { // (v9999.iteratorChain.elementData @ #!0)
-      Instance left  = findCorrespond(instance.getLeft(), findFrom, arrayRelation);
-      Instance right = findCorrespond(instance.getRight(), findFrom, arrayRelation);
+      Instance left  = findCorrespond(instance.getLeft(), findFrom, arrayRelation, modelValues);
+      Instance right = findCorrespond(instance.getRight(), findFrom, arrayRelation, modelValues);
       for (int i = arrayRelation.getFunctionCount() - 1; i >= 0; i--) {
         if (arrayRelation.isUpdate(i)) {
           if (arrayRelation.getDomainValues().get(i)[0] == left) {
@@ -1562,11 +1605,14 @@ public class ParamReqDeductor {
               correspond = arrayRelation.getRangeValues().get(i);
               break;
             }
-            else if (!indexInstance.isConstant() || !right.isConstant()) {
-              // XXX this is not correct, because there could be many updates to left[indexInstance], 
-              // and any one (or multiple or none) of them can equal to right. Will fix later
-              correspond = arrayRelation.getRangeValues().get(i);
-              break;
+            else {
+              String indexValue = indexInstance.isConstant() ? indexInstance.toString() : indexInstance.computeArithmetic(modelValues);
+              String rightValue = right.isConstant() ? right.toString() : right.computeArithmetic(modelValues);
+              if (rightValue != null && rightValue.equals(indexValue)) {
+                // XXX use the model value, this is not sound, but works in most common cases
+                correspond = arrayRelation.getRangeValues().get(i);
+                break;
+              }
             }
           }
         }
