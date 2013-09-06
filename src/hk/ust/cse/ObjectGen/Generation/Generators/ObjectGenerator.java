@@ -62,6 +62,8 @@ public class ObjectGenerator extends AbstractGenerator {
 
       // for inner class or inner anonymous class, find creation methods from outer class
       Class<?> targetType = req.getTargetType();
+      assert(targetType != null);
+      
       List<String> createInnerMethods = null;
       if (!Modifier.isPublic(targetType.getModifiers()) && targetType.isMemberClass()) {
         Class<?> outerClass = targetType.getDeclaringClass();
@@ -115,6 +117,9 @@ public class ObjectGenerator extends AbstractGenerator {
         }
       }
       
+      // statistic
+      m_potentialMethodsRetrieved += potentialMethods.size();
+      
       // try each potential methods sequentially
       boolean targetFromRet = false;
       for (int i = 0, size = potentialMethods.size(); 
@@ -129,6 +134,9 @@ public class ObjectGenerator extends AbstractGenerator {
         // output current status
         printStepSpaces(ancestorReqs.size());
         System.out.println(" trying " + potentialMethodSig + " at step " + (ancestorReqs.size()));
+
+        // statistic
+        m_potentialMethodsTried++;
         
         // identify if current method is factory or create inner class method
         boolean isFactoryOrCreateInner = factoryOrCreateInners.contains(potentialMethodSig);
@@ -474,9 +482,21 @@ public class ObjectGenerator extends AbstractGenerator {
     return m_smtChecker;
   }
   
+  public int getTotalPotentialRetrieved() {
+    return m_potentialMethodsRetrieved;
+  }
+  
+  public int getTotalPotentialTried() {
+    return m_potentialMethodsTried;
+  }
+  
   private final int                    m_maxStep;
   private final HashSet<String>        m_filterMethods;
   private final SMTChecker             m_smtChecker;
   private final AbstractMethodSelector m_selector;
   private final SummaryDatabase        m_summaryDatabase;
+  
+  // global statistics
+  private int m_potentialMethodsRetrieved;
+  private int m_potentialMethodsTried;
 }

@@ -49,6 +49,24 @@ public class GenerationThread extends Thread {
         hashCodeVarMap = prevHashCodeVarMap;
       }
     }
+    
+    // print statistics
+    int totalObjectsNeeded  = 0;
+    int totalSequenceLength = 0;
+    for (String varName : m_genResult.getGenOrder()) {
+      Sequence sequence = m_genResult.getSequence(varName);
+      totalSequenceLength += sequence.getStatements().size();
+      
+      Requirement req = m_requirements.getRequirement(varName);
+      if (!req.getTargetType().isPrimitive()) {
+        totalObjectsNeeded++;
+      }
+    }
+    System.out.println();
+    m_generator.printStatistics();
+    System.out.println("Total objects needed: " + totalObjectsNeeded);
+    System.out.println("Total sequence length: " + (totalSequenceLength + 1 /* + 1 for the final invocation */));
+    System.out.println();
   }
   
   private VarNamePool     m_varNamePool;

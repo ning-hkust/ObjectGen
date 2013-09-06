@@ -299,9 +299,6 @@ public class Generator {
     return ret;
   }
   
-
-  
-
   private List<String> sortSubClasses(String superClass, List<String> subClasses, int maxSubClasses) {
     List<String> sorted = new ArrayList<String>();
     
@@ -335,6 +332,11 @@ public class Generator {
     }
 
     return sorted;
+  }
+  
+  public void printStatistics() {
+    System.out.println("Total potential methods retrieved: " + m_objectGenerator.getTotalPotentialRetrieved());
+    System.out.println("Total potential methods tried: " + m_objectGenerator.getTotalPotentialTried());
   }
   
   public WalaAnalyzer getWalaAnalyzer() {
