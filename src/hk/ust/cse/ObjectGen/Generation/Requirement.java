@@ -119,6 +119,24 @@ public class Requirement {
     return contains;
   }
   
+  public boolean containsString(String str) {
+    // ignore type conditions
+    List<Condition> nonTypeConditions = new ArrayList<Condition>();
+    for (Condition condition : m_conditions) {
+      if (condition.getOnlyTypeTerm() == null) {
+        nonTypeConditions.add(condition);
+      }
+    }
+
+    boolean contains = false;
+    for (int i = 0, size = nonTypeConditions.size(); i < size && !contains; i++) {
+      BinaryConditionTerm term = nonTypeConditions.get(i).getOnlyBinaryTerm();
+      String termStr = term != null ? term.toString() : null;
+      contains = termStr != null && termStr.contains(str);
+    }
+    return contains;
+  }
+  
   // >=
   public boolean subsumes(Requirement req) {
     boolean subsumes = m_compareStrings.size() >= req.getCompareStrings().size();

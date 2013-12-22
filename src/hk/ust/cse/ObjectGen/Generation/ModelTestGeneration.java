@@ -978,7 +978,7 @@ public class ModelTestGeneration {
         args[6],                   /* filter model list file */
         args[7],                   /* filter method list file */
         Integer.parseInt(args[8]), /* max step */
-        5,                         /* max sub-classes */
+        10,                         /* max sub-classes */
         Integer.parseInt(args[9]), /* accessibility */
         true);                     /* relax generation */
     

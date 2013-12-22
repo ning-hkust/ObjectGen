@@ -463,6 +463,16 @@ public class Requirements {
     else if (fieldName.equals("__hashcode__")) {
       fieldType = "I";
     }
+    else if (fieldName.equals("__prop__parentFile__")) {
+      fieldType = "Ljava/io/File";
+    }
+    else if (fieldName.equals("__prop__name__")) {
+      fieldType = "Ljava/lang/String";
+    }
+    else if (fieldName.equals("__state__exist__") || 
+             fieldName.equals("__state__dir__")) {
+      fieldType = "I";
+    }
     else if ((objType.matches("L[\\S]+Map") || 
               objType.matches("Ljava/util/Hashtable")) && fieldName.equals("size")) {
       fieldType = "I";

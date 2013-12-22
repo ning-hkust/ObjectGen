@@ -1158,6 +1158,7 @@ public class SummaryExtractor {
       //String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-log4j/targets/log4j-1.2.14_removed.jar";
       String appJar = "D:/Projects/STAR/experiments/ObjectGen/apache-commons-collections/targets/commons-collections-4.0-r1351903.jar";
       //String appJar = "D:/Projects/STAR/experiments/ObjectGen/crawler4j/targets/crawler4j-3.3.jar";
+      //String appJar = "D:/Projects/STAR/experiments/ObjectGen/aspectj/targets/aspectjtools-1.1.1_removed.jar";
       //String appJar = "D:/Projects/ObjectGen/hk.ust.cse.ObjectGen.jar";
       String pseudoImplJar = "./lib/hk.ust.cse.Prevision_PseudoImpl.jar";
       SummaryExtractor extractor = new SummaryExtractor(appJar, pseudoImplJar);
@@ -1192,7 +1193,7 @@ public class SummaryExtractor {
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.list.TreeList$TreeListIterator.next()Ljava/lang/Object;");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.iterators.ObjectGraphIterator.findNextByIterator(Ljava/util/Iterator;)V");
       //IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.iterators.ObjectGraphIterator.next()Ljava/lang/Object;");
-      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "org.apache.commons.collections.map.ListOrderedMap.put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;");
+      IR ir = Jar2IR.getIR(extractor.getWalaAnalyzer(), "java.io.File.<init>(Ljava/io/File;Ljava/lang/String;)V");
       
       // read the list of all/filter/extracted methods
       HashSet<String> allMethodSet = Utils.readStringSetFromFile("./summaries/all_methods.txt");

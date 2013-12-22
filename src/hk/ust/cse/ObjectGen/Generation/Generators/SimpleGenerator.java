@@ -2,10 +2,14 @@ package hk.ust.cse.ObjectGen.Generation.Generators;
 
 import hk.ust.cse.ObjectGen.Generation.Generator;
 import hk.ust.cse.ObjectGen.Generation.Requirement;
+import hk.ust.cse.ObjectGen.Generation.TestCase.AssignmentStatement;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Sequence;
 import hk.ust.cse.ObjectGen.Generation.TestCase.Variable;
 import hk.ust.cse.Wala.Jar2IR;
+import hk.ust.cse.util.Utils;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.Hashtable;
 import java.util.List;
 
@@ -31,7 +35,8 @@ public class SimpleGenerator extends AbstractGenerator {
       else if (req.getTargetType() == java.math.BigInteger.class) {
         seq = createBigInteger();
       }
-      else if (req.getTargetType() == java.io.File.class) {
+      else if (req.getTargetType() == java.io.File.class && !req.containsString("__prop__") && 
+                                                            !req.containsString("__state__")) {
         seq = createFile();
       }
       else if (req.getTargetType() == java.lang.Package.class) {
@@ -42,6 +47,9 @@ public class SimpleGenerator extends AbstractGenerator {
       }
       else if (req.getTargetType() == java.lang.String.class && req.containsCondition("v9999 == ##%existing_file%")) {
         seq = createExistingFilePath();
+      }
+      else if (req.getConditions().size() == 1) {
+        seq = tryUseStaticField(req.getTargetInstance().getLastRefType());
       }
     }
     return seq;
@@ -106,6 +114,32 @@ public class SimpleGenerator extends AbstractGenerator {
       allParams.putAll(parameters);
       seq.addMethod(ir, allParams, false);
     }
+    return seq;
+  }
+
+  private Sequence tryUseStaticField(String className) {
+    Sequence seq = null;
+    
+    Class<?> targetClass = className != null ? Utils.findClass(className) : null;
+    if (targetClass != null) {
+      for (Field field : Utils.getInheritedFields(targetClass)) {
+        int mod = field.getModifiers();
+        if (Modifier.isPublic(mod) && Modifier.isStatic(mod) && Modifier.isFinal(mod)) {
+          try {
+            Object fieldObj = field.get(null);
+            if (fieldObj != null && Utils.isSubClass(targetClass, fieldObj.getClass())) {
+              String pubClassName = Utils.getClosestPublicSuperClass(targetClass).getName();
+              Variable assignTo   = new Variable(nextVariableName(), pubClassName);
+              Variable assignFrom = new Variable(Utils.getClassTypeJavaStr(
+                  field.getDeclaringClass().getName()) + "." + field.getName(), pubClassName);
+              seq = new Sequence(assignTo);
+              seq.addStatement(new AssignmentStatement(assignTo, assignFrom));
+            }
+          } catch (Exception e) {}
+        }
+      }
+    }
+    
     return seq;
   }
 }

@@ -145,6 +145,7 @@ public class MethodListExtractor {
         //"../../STAR/experiments/ObjectGen/apache-log4j/targets/log4j-1.0.4.jar", 
         //"../../STAR/experiments/ObjectGen/apache-ant/targets/ant-all-1.6.2.jar", 
         //"../../STAR/experiments/ObjectGen/crawler4j/targets/crawler4j-3.3.jar", 
+        //"../../STAR/experiments/ObjectGen/aspectj/targets/aspectjtools-1.1.0.jar", 
         "./lib/hk.ust.cse.Prevision_PseudoImpl.jar");
 
     List<String> allowPrefix = new ArrayList<String>();
@@ -183,10 +184,11 @@ public class MethodListExtractor {
 //    allowPrefix.add("java.io.StringWriter");
 //    allowPrefix.add("java.io.OutputStreamWriter");
 //    allowPrefix.add("java.io.File.<init>");
-    allowPrefix.add("org.apache.");
+//    allowPrefix.add("org.apache.");
 //    allowPrefix.add("org.sat4j.");
 //    allowPrefix.add("com.martiansoftware.");
-//      allowPrefix.add("edu.uci.ics.crawler4j.");
+//    allowPrefix.add("edu.uci.ics.crawler4j.");
+      allowPrefix.add("org.");
 //    allowPrefix.add("hk.ust.cse.Prevision_PseudoImpl.");
     extractor.produceAllMethodList(allowPrefix);
   }

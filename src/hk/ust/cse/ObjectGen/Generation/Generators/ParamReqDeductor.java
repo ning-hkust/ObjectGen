@@ -1179,6 +1179,17 @@ public class ParamReqDeductor {
         // use concrete values for variables in multiple parameters conditions
         HashSet<Instance> instances = condition.getRelatedInstances(summary.getRelationMap(), false, false, true, false);
         useConcreteValues.addAll(instances); // should not have array read instances
+
+        // put (v1 @ #!0) to useConcreteValues
+        String conditionStr = condition.toString();
+        if (conditionStr.contains("read_@@array_")) { // e.g. read_@@array_24445942322829.bytes != null
+          instances = condition.getRelatedInstances(summary.getRelationMap(), true, false, true, false);
+          for (Instance instance : instances) {
+            if (instance.isRelationRead() && !readArrayMap.containsKey(instance)) {
+              convertArrayRead1(instance, summaryArrayRel, readArrayMap);
+            }
+          }
+        }
       }
       else if (topInstances.size() > 0) {
         // e.g. java.lang.System.getProperty(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;_2039300846879621
@@ -1193,7 +1204,7 @@ public class ParamReqDeductor {
               HashSet<Instance> instances = condition.getRelatedInstances(summary.getRelationMap(), true, false, true, false);
               for (Instance instance : instances) {
                 if (instance.isRelationRead() && !readArrayMap.containsKey(instance)) {
-                  readArrayMap.put(instance, convertArrayRead1(instance, summaryArrayRel));
+                  convertArrayRead1(instance, summaryArrayRel, readArrayMap);
                 }
               }
             }
@@ -1204,10 +1215,16 @@ public class ParamReqDeductor {
     }
     addedConditions.clear();
     for (int i = 0, size = deductConditions.size(); i < size; i++) {
-      Condition condition = deductConditions.get(i).replaceInstances(readArrayMap); // replace read_@@array_
+      Condition condition = deductConditions.get(i).replaceInstances(readArrayMap); // replace read_@@array_ with (v1 @ #!)
       deductConditions.set(i, condition);
       addedConditions.add(condition.toString());
     }
+    HashSet<Instance> useConcreteValues2 = new HashSet<Instance>();
+    for (Instance instance : useConcreteValues) {
+      Instance replaced = instance.replaceInstances(readArrayMap); // replace read_@@array_ with (v1 @ #!)
+      useConcreteValues2.add(replaced != null ? replaced : instance);
+    }
+    useConcreteValues = useConcreteValues2;
 
     // create a model value mapping
     Hashtable<String, String> modelValues = new Hashtable<String, String>();
@@ -1300,11 +1317,12 @@ public class ParamReqDeductor {
     }
     
     if (useConcreteValues.size() > 0) {
+      List<Instance> useConcreteValuesSorted = sortByDependency(useConcreteValues);
       // construct a (summaryInstance - concrete) mapping
       // construct a (modelInstance - summaryInstance) mapping
       Hashtable<Instance, Instance> modelSummaryMap    = new Hashtable<Instance, Instance>();
       Hashtable<Instance, Instance> summaryConcreteMap = new Hashtable<Instance, Instance>();
-      for (Instance useConcreteValue : useConcreteValues) {
+      for (Instance useConcreteValue : useConcreteValuesSorted) {
         for (Condition modelCondition : modelConditions) {
           BinaryConditionTerm binaryTerm = modelCondition.getOnlyBinaryTerm();
           Instance instance1 = binaryTerm.getInstance1();
@@ -1314,7 +1332,7 @@ public class ParamReqDeductor {
             if (instance1.toString().equals(useConcreteValue.toString())) {
               if (binaryTerm.isNotEqualToNull()) {
                 // necessary because useConcreteValue may contain index instance to be concretized
-                summaryConcreteMap.put(useConcreteValue, useConcreteValue);
+                //summaryConcreteMap.put(useConcreteValue, useConcreteValue);
               }
               else {
                 summaryConcreteMap.put(useConcreteValue, instance2);
@@ -1323,17 +1341,19 @@ public class ParamReqDeductor {
               break;
             }
           }
-          else if (topInstance.isBounded() && !topInstance.isAtomic() && 
-                   useConcreteValue.isBounded() && !useConcreteValue.isAtomic()) { // (v1 @ #!0)
-            if (instance1.toString().equals(useConcreteValue.computeInnerArithmetic())) {
+          else if (topInstance.isBounded() && !topInstance.isAtomic() /*&& 
+                   useConcreteValue.isBounded() && !useConcreteValue.isAtomic()*/) { // (v1 @ #!0)
+            // concretize any instances within useConcreteValue (mostly index)
+            Instance useConcreteValue2 = useConcreteValue.replaceInstances(summaryConcreteMap);
+            if (instance1.toString().equals(useConcreteValue2.computeInnerArithmetic())) {
               if (binaryTerm.isNotEqualToNull()) {
                 // necessary because useConcreteValue may contain index instance to be concretized
-                summaryConcreteMap.put(useConcreteValue, useConcreteValue);
+                //summaryConcreteMap.put(useConcreteValue, useConcreteValue);
               }
               else {
                 summaryConcreteMap.put(useConcreteValue, instance2);
               }
-              modelSummaryMap.put(instance1, useConcreteValue);
+              //modelSummaryMap.put(instance1, useConcreteValue);
               break;
             }
           }
@@ -1357,9 +1377,15 @@ public class ParamReqDeductor {
       int addedModels = 0;
       HashSet<String> useConcreteValueStrs = new HashSet<String>();
       for (Instance instance : useConcreteValues) {
-        instance = summaryConcreteMap.containsKey(instance) ? 
-            instance : instance.replaceInstances(summaryConcreteMap) /* replace array index to concrete */;
-        useConcreteValueStrs.add(instance.toString());
+        if (summaryConcreteMap.containsKey(instance)) {
+          // only replace instances inside
+          instance = instance.replaceInstances(summaryConcreteMap, true);
+          useConcreteValueStrs.add(instance.toString());
+        }
+        else {
+          instance = instance.replaceInstances(summaryConcreteMap) /* replace array index to concrete */;
+          useConcreteValueStrs.add(instance.toString());
+        }
       }
       for (Condition condition : modelConditions) {
         HashSet<Instance> instances = condition.getRelatedInstances(new Hashtable<String, Relation>(), false, false, false, false);
@@ -1459,21 +1485,25 @@ public class ParamReqDeductor {
   }
 
   // convert read_@@array_ to (v1.elementData @ #!0) format
-  private Instance convertArrayRead1(Instance instance, Relation arrayRelation) {
-    Instance converted = null;
+  private Instance convertArrayRead1(Instance instance, Relation arrayRelation, Hashtable<Instance, Instance> readArrayMap) {
+    Instance converted = readArrayMap.get(instance);
+    if (converted != null) {
+      return converted;
+    }
+    
     if (instance.isRelationRead()) {
       long readTime     = instance.getLastReference().getReadRelTime();
       int index         = arrayRelation.getIndex(readTime);
       Instance relObj   = arrayRelation.getDomainValues().get(index)[0];
       Instance relindex = arrayRelation.getDomainValues().get(index)[1];
       
-      relObj   = convertArrayRead1(relObj, arrayRelation);
-      relindex = convertArrayRead1(relindex, arrayRelation);
+      relObj   = convertArrayRead1(relObj, arrayRelation, readArrayMap);
+      relindex = convertArrayRead1(relindex, arrayRelation, readArrayMap);
       converted = new Instance(relObj, INSTANCE_OP.DUMMY, relindex, null);
     }
     else if (instance.hasDeclaringInstance()) {
       Instance declInstance  = instance.getLastReference().getDeclaringInstance();
-      Instance declInstance2 = convertArrayRead1(declInstance, arrayRelation);
+      Instance declInstance2 = convertArrayRead1(declInstance, arrayRelation, readArrayMap);
       if (declInstance2 != declInstance) {
         Reference fieldRef1 = instance.getLastReference();
         Reference fieldRef2 = declInstance2.getField(fieldRef1.getName());
@@ -1489,6 +1519,10 @@ public class ParamReqDeductor {
     }
     else {
       converted = instance;
+    }
+    
+    if (converted != instance) {
+      readArrayMap.put(instance, converted);
     }
     return converted;
   }
@@ -1667,6 +1701,34 @@ public class ParamReqDeductor {
       req.setTargetInstance(topInstance, useInnerClass);
     }
     return requirements;
+  }
+  
+  private List<Instance> sortByDependency(HashSet<Instance> instances) {
+    List<Instance> sorted = new ArrayList<Instance>(instances);
+
+    final Hashtable<Instance, HashSet<Instance>> dependencyMap = new Hashtable<Instance, HashSet<Instance>>();
+    for (int i = 0, size = sorted.size(); i < size; i++) {
+      Instance instance1 = sorted.get(i);
+      HashSet<Instance> dependent1 = dependencyMap.get(instance1);
+      if (dependent1 == null) {
+        dependent1 = instance1.getRelatedInstances(new Hashtable<String, Relation>(), true, true, false, false);
+        dependent1.remove(instance1);
+        dependencyMap.put(instance1, dependent1);
+        if (dependent1.size() == 0) {
+          continue;
+        }
+      }
+      for (int j = i + 1; j < size; j++) {
+        Instance instance2 = sorted.get(j);
+        if (dependent1.contains(instance2)) {
+          sorted.set(i, instance2);
+          sorted.set(j, instance1);
+          i--;
+          break;
+        }
+      }
+    }
+    return sorted;
   }
   
   public SMTChecker getSMTChecker() {

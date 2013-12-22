@@ -168,7 +168,6 @@ public class ObjectGenerator extends AbstractGenerator {
         System.out.println("Original Summary Count: " + methodSummaries.size() + 
             ". Refined Summary Count: " + summarySelector.getSummaryCount());
 
-        
         int summaryIndex               = 0;
         Requirements prevChildReqs     = null;
         GenerationResult prevGenResult = null;
@@ -450,6 +449,13 @@ public class ObjectGenerator extends AbstractGenerator {
         else if (!ir.getMethod().isPublic()) {
           score -= 100;
         }
+        
+        // dislike IO related methods
+        boolean ioRelated = false;
+        for (int i = 0; i < ir.getNumberOfParameters() && !ioRelated; i++) {
+          ioRelated |= ir.getParameterType(i).getName().toString().contains("Ljava/io/");
+        }
+        score -= ioRelated ? 100 : 0;
       }
     
       // prefer by name
